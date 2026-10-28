@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-hawdb:
+    name: Build HawDB v0.19.0 wheel
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out HawDB v0.19.0
+        uses: actions/checkout@v4
+        with:
+          repository: nowledge-co/hawdb
+          ref: v0.19.0
+          path: .ci/hawdb
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.1
+
+      - name: Install build and test dependencies
+        run: python -m pip install --upgrade pip maturin
+
+      - name: Build HawDB Python binding wheel
+        working-directory: .ci/hawdb/bindings/python
+        run: maturin build --out dist
+
+      - name: Upload HawDB Python binding wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: hawdb-v0.19.0-python-wheel
+          path: .ci/hawdb/bindings/python/dist/*.whl
+          if-no-files-found: error
+
+  test:
+    name: HawDB v0.19.0 / Python ${{ matrix.python-version }}
+    needs: build-hawdb
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Check out sqlalchemy_hawdb
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Download HawDB Python binding wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: hawdb-v0.19.0-python-wheel
+          path: .ci/hawdb/dist
+
+      - name: Install HawDB Python binding
+        run: python -m pip install .ci/hawdb/dist/*.whl
+
+      - name: Install SQLAlchemy dialect and tests
+        run: python -m pip install -e '.[test]'
+
+      - name: Verify HawDB binding package
+        run: python -c 'import hawdb; assert callable(hawdb.open); print(hawdb.__file__)'
+
+      - name: Check Python formatting
+        run: python -m ruff format --check sqlalchemy_hawdb tests
+
+      - name: Run tests
+        run: python -m pytest
