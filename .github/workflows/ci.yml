@@ -4,49 +4,61 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
 jobs:
-  build-hawdb:
-    name: Build HawDB v0.19.0 wheel
+  build:
+    name: Build distributions
     runs-on: ubuntu-latest
     steps:
-      - name: Check out HawDB v0.19.0
+      - name: Check out sqlalchemy_hawdb
         uses: actions/checkout@v4
         with:
-          repository: nowledge-co/hawdb
-          ref: v0.19.0
-          path: .ci/hawdb
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.97.1
+      - name: Check release version
+        if: github.event_name == 'release'
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
 
-      - name: Install build and test dependencies
-        run: python -m pip install --upgrade pip maturin
+          version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+          tag = os.environ["RELEASE_TAG"]
+          if tag != f"v{version}":
+              raise SystemExit(f"Release tag {tag!r} does not match package version {version!r}")
+          PY
 
-      - name: Build HawDB Python binding wheel
-        working-directory: .ci/hawdb/bindings/python
-        run: maturin build --out dist
+      - name: Install build tools
+        run: python -m pip install build twine
 
-      - name: Upload HawDB Python binding wheel
+      - name: Build source distribution and wheel
+        run: python -m build
+
+      - name: Check distribution metadata
+        run: python -m twine check --strict dist/*
+
+      - name: Upload distributions
         uses: actions/upload-artifact@v4
         with:
-          name: hawdb-v0.19.0-python-wheel
-          path: .ci/hawdb/bindings/python/dist/*.whl
+          name: python-distributions
+          path: dist/*
           if-no-files-found: error
 
   test:
-    name: HawDB v0.19.0 / Python ${{ matrix.python-version }}
-    needs: build-hawdb
+    name: HawDB v0.20.0 / Python ${{ matrix.python-version }}
+    needs: build
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -55,29 +67,45 @@ jobs:
     steps:
       - name: Check out sqlalchemy_hawdb
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Download HawDB Python binding wheel
+      - name: Download distributions
         uses: actions/download-artifact@v4
         with:
-          name: hawdb-v0.19.0-python-wheel
-          path: .ci/hawdb/dist
+          name: python-distributions
+          path: dist
 
-      - name: Install HawDB Python binding
-        run: python -m pip install .ci/hawdb/dist/*.whl
-
-      - name: Install SQLAlchemy dialect and tests
-        run: python -m pip install -e '.[test]'
+      - name: Install the wheel and HawDB from PyPI
+        run: |
+          wheels=(dist/*.whl)
+          python -m pip install --only-binary=hawdb "${wheels[0]}[test]" 'hawdb==0.20.0'
 
       - name: Verify HawDB binding package
-        run: python -c 'import hawdb; assert callable(hawdb.open); print(hawdb.__file__)'
+        working-directory: ${{ runner.temp }}
+        run: |
+          python - <<'PY'
+          from importlib.metadata import version
 
-      - name: Check Python formatting
-        run: python -m ruff format --check sqlalchemy_hawdb tests
+          import hawdb
+          from sqlalchemy_hawdb import HawDBDialect
 
-      - name: Run tests
-        run: python -m pytest
+          assert version("hawdb") == "0.20.0"
+          assert callable(hawdb.open)
+          assert callable(HawDBDialect.import_dbapi().connect)
+          print(hawdb.__file__)
+          PY
+
+      - name: Check Python lint and formatting
+        run: |
+          python -m ruff check sqlalchemy_hawdb tests
+          python -m ruff format --check sqlalchemy_hawdb tests
+
+      - name: Run tests against the installed wheel
+        working-directory: ${{ runner.temp }}
+        run: python -m pytest "$GITHUB_WORKSPACE/tests"
