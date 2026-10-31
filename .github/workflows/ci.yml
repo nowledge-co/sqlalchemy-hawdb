@@ -10,6 +10,44 @@ permissions:
   contents: read
 
 jobs:
+  build-hawdb:
+    name: Build HawDB v0.23.0 wheel
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out HawDB v0.23.0
+        uses: actions/checkout@v4
+        with:
+          repository: nowledge-co/hawdb
+          ref: v0.23.0
+          path: .ci/hawdb
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
+
+      - name: Install maturin
+        run: python -m pip install maturin==1.15.0
+
+      - name: Build HawDB Python wheel
+        working-directory: .ci/hawdb/bindings/python
+        env:
+          RUSTUP_TOOLCHAIN: 1.99.1
+        run: maturin build --release --out dist
+
+      - name: Upload HawDB Python wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: hawdb-v0.23.0-python-wheel
+          path: .ci/hawdb/bindings/python/dist/*.whl
+          if-no-files-found: error
+
   build:
     name: Build distributions
     runs-on: ubuntu-latest
@@ -76,8 +114,8 @@ jobs:
           if-no-files-found: error
 
   test:
-    name: HawDB v0.22.0 / Python ${{ matrix.python-version }}
-    needs: build
+    name: HawDB v0.23.0 / Python ${{ matrix.python-version }}
+    needs: [build, build-hawdb]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -100,10 +138,17 @@ jobs:
           name: python-distributions
           path: dist
 
-      - name: Install the wheel and HawDB from PyPI
+      - name: Download HawDB wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: hawdb-v0.23.0-python-wheel
+          path: hawdb-dist
+
+      - name: Install the dialect wheel and HawDB
         run: |
           wheels=(dist/*.whl)
-          python -m pip install --only-binary=hawdb "${wheels[0]}[test]" 'hawdb==0.22.0'
+          hawdb_wheels=(hawdb-dist/*.whl)
+          python -m pip install --only-binary=hawdb "${hawdb_wheels[0]}" "${wheels[0]}[test]"
 
       - name: Verify HawDB binding package
         working-directory: ${{ runner.temp }}
@@ -114,7 +159,7 @@ jobs:
           import hawdb
           from sqlalchemy_hawdb import HawDBDialect
 
-          assert version("hawdb") == "0.22.0"
+          assert version("hawdb") == "0.23.0"
           assert callable(hawdb.open)
           assert callable(HawDBDialect.import_dbapi().connect)
           print(hawdb.__file__)
