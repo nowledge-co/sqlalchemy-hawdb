@@ -1,4 +1,3 @@
-import pytest
 from sqlalchemy import (
     Column,
     Integer,
@@ -12,8 +11,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session, declarative_base
-
-pytest.importorskip("hawdb")
 
 
 def make_engine(path):
@@ -41,6 +38,17 @@ def test_core_create_insert_select_and_reflection(tmp_path):
             rows = connection.execute(
                 select(widgets.c.id, widgets.c.name).order_by(widgets.c.id)
             ).all()
+            reordered = connection.execute(
+                select(widgets.c.name, widgets.c.id).order_by(widgets.c.id)
+            )
+            assert list(reordered.keys()) == ["name", "id"]
+            assert reordered.all() == [("first", 1), ("second", 2)]
+
+            empty = connection.execute(
+                select(widgets.c.name, widgets.c.id).where(widgets.c.id < 0)
+            )
+            assert list(empty.keys()) == ["name", "id"]
+            assert empty.all() == []
         assert rows == [(1, "first"), (2, "second")]
 
         inspector = inspect(engine)

@@ -7,21 +7,16 @@ duplicate its DBAPI implementation.
 ## Requirements
 
 - Python 3.11 or newer
-- HawDB Python binding v0.19.0, built from the HawDB repository
+- HawDB Python binding 0.22.x (CI tests 0.22.0)
 - SQLAlchemy 2.x
 
-The HawDB binding is not published to PyPI yet. Build and install its wheel
-first:
+Install the dialect and its HawDB dependency from PyPI:
 
 ```sh
-git clone --branch v0.19.0 https://github.com/nowledge-co/hawdb.git
-cd hawdb/bindings/python
-python -m pip install maturin
-maturin build --release --out dist
-python -m pip install dist/*.whl
+python -m pip install sqlalchemy-hawdb
 ```
 
-Then install this checkout of the dialect:
+To install this checkout instead:
 
 ```sh
 python -m pip install /path/to/sqlalchemy_hawdb
@@ -84,12 +79,32 @@ dialect.
 
 ## Development
 
-Install the HawDB v0.19.0 binding as above, then install the project and tests:
+Install the project, the HawDB dependency, and the test tools:
 
 ```sh
 python -m pip install -e '.[test]'
 python -m pytest
 ```
 
-GitHub Actions builds the pinned HawDB binding and runs unit and integration
-tests on every push and pull request.
+GitHub Actions builds the source distribution and wheel, checks their metadata,
+and tests the installed wheel against `hawdb==0.22.0` from PyPI on Python
+3.11-3.13 for every push and pull request. Missing HawDB wheels fail CI rather
+than skipping integration tests or falling back to a source build.
+
+## Publishing
+
+`.github/workflows/pypi.yaml` publishes the tested source distribution and wheel
+when a GitHub Release is published. The release tag must match the version in
+`pyproject.toml`, for example `v0.1.0`. A manual workflow dispatch runs the same
+build and tests without uploading to PyPI.
+
+Configure a PyPI Trusted Publisher for the `sqlalchemy-hawdb` project with:
+
+- Owner: `nowledge-co`
+- Repository: `sqlalchemy_hawdb`
+- Workflow: `pypi.yaml`
+- Environment: `pypi`
+
+For the first release, configure a pending publisher in your PyPI account.
+The publish job uses GitHub's `pypi` environment and OIDC; no PyPI API token
+secret is required.

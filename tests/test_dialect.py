@@ -1,4 +1,3 @@
-import pytest
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -77,7 +76,6 @@ def test_memory_databases_are_pooled_per_thread_but_file_handles_are_not_pooled(
 
 
 def test_dialect_uses_hawdb_native_dbapi():
-    pytest.importorskip("hawdb")
     dbapi = HawDBDialect.import_dbapi()
 
     assert dbapi.paramstyle == "numeric_dollar"
