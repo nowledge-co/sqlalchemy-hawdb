@@ -18,7 +18,8 @@ jobs:
 
   publish:
     name: Publish distributions to PyPI
-    if: github.event_name == 'release' && github.repository == 'nowledge-co/sqlalchemy_hawdb'
+    # repository_id remains stable if the repository is renamed.
+    if: github.event_name == 'release' && github.repository_id == '1437214229'
     needs: build-and-test
     runs-on: ubuntu-latest
     environment:
