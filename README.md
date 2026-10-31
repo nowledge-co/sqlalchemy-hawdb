@@ -1,6 +1,6 @@
 # SQLAlchemy HawDB
 
-`sqlalchemy-hawdb` provides a SQLAlchemy 2.x dialect for the embedded HawDB
+`sqlalchemy_hawdb` provides a SQLAlchemy 2.x dialect for the embedded HawDB
 database. It uses HawDB's own PEP 249 driver and does not add a wire protocol or
 duplicate its DBAPI implementation.
 
@@ -13,7 +13,7 @@ duplicate its DBAPI implementation.
 Install the dialect and its HawDB dependency from PyPI:
 
 ```sh
-python -m pip install sqlalchemy-hawdb
+python -m pip install sqlalchemy_hawdb
 ```
 
 To install this checkout instead:
@@ -95,10 +95,10 @@ than skipping integration tests or falling back to a source build.
 
 `.github/workflows/pypi.yaml` publishes the tested source distribution and wheel
 when a GitHub Release is published. The release tag must match the version in
-`pyproject.toml`, for example `v0.1.0`. A manual workflow dispatch runs the same
+`pyproject.toml`, for example `v0.22.0`. A manual workflow dispatch runs the same
 build and tests without uploading to PyPI.
 
-Configure a PyPI Trusted Publisher for the `sqlalchemy-hawdb` project with:
+Configure a PyPI Trusted Publisher for the `sqlalchemy_hawdb` project with:
 
 - Owner: `nowledge-co`
 - Repository: `sqlalchemy_hawdb`
