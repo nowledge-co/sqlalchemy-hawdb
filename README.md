@@ -95,13 +95,13 @@ than skipping integration tests or falling back to a source build.
 
 `.github/workflows/pypi.yaml` publishes the tested source distribution and wheel
 when a GitHub Release is published. The release tag must match the version in
-`pyproject.toml`, for example `v0.1.0`. A manual workflow dispatch runs the same
+`pyproject.toml`, for example `v0.22.0`. A manual workflow dispatch runs the same
 build and tests without uploading to PyPI.
 
 Configure a PyPI Trusted Publisher for the `sqlalchemy-hawdb` project with:
 
 - Owner: `nowledge-co`
-- Repository: `sqlalchemy_hawdb`
+- Repository: `sqlalchemy-hawdb`
 - Workflow: `pypi.yaml`
 - Environment: `pypi`
 
