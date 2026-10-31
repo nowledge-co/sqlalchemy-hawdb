@@ -62,7 +62,7 @@ jobs:
           if-no-files-found: error
 
   test:
-    name: HawDB v0.20.0 / Python ${{ matrix.python-version }}
+    name: HawDB v0.22.0 / Python ${{ matrix.python-version }}
     needs: build
     runs-on: ubuntu-latest
     strategy:
@@ -89,7 +89,7 @@ jobs:
       - name: Install the wheel and HawDB from PyPI
         run: |
           wheels=(dist/*.whl)
-          python -m pip install --only-binary=hawdb "${wheels[0]}[test]" 'hawdb==0.20.0'
+          python -m pip install --only-binary=hawdb "${wheels[0]}[test]" 'hawdb==0.22.0'
 
       - name: Verify HawDB binding package
         working-directory: ${{ runner.temp }}
@@ -100,7 +100,7 @@ jobs:
           import hawdb
           from sqlalchemy_hawdb import HawDBDialect
 
-          assert version("hawdb") == "0.20.0"
+          assert version("hawdb") == "0.22.0"
           assert callable(hawdb.open)
           assert callable(HawDBDialect.import_dbapi().connect)
           print(hawdb.__file__)

@@ -9,7 +9,7 @@ description = "SQLAlchemy dialect for the embedded HawDB database"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
-dependencies = ["SQLAlchemy>=2.0,<3.0", "hawdb>=0.20.0,<0.21.0"]
+dependencies = ["SQLAlchemy>=2.0,<3.0", "hawdb>=0.22.0,<0.23.0"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Framework :: SQLAlchemy",

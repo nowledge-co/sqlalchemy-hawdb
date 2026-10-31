@@ -7,7 +7,7 @@ duplicate its DBAPI implementation.
 ## Requirements
 
 - Python 3.11 or newer
-- HawDB Python binding 0.20.x (CI tests 0.20.0)
+- HawDB Python binding 0.22.x (CI tests 0.22.0)
 - SQLAlchemy 2.x
 
 Install the dialect and its HawDB dependency from PyPI:
@@ -87,7 +87,7 @@ python -m pytest
 ```
 
 GitHub Actions builds the source distribution and wheel, checks their metadata,
-and tests the installed wheel against `hawdb==0.20.0` from PyPI on Python
+and tests the installed wheel against `hawdb==0.22.0` from PyPI on Python
 3.11-3.13 for every push and pull request. Missing HawDB wheels fail CI rather
 than skipping integration tests or falling back to a source build.
 
