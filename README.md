@@ -7,7 +7,7 @@ duplicate its DBAPI implementation.
 ## Requirements
 
 - Python 3.11 or newer
-- HawDB Python binding 0.23.x (CI tests 0.23.0)
+- HawDB Python binding 0.24.x (CI tests 0.24.0)
 - SQLAlchemy 2.x
 
 Install the dialect and its HawDB dependency from PyPI:
@@ -16,11 +16,11 @@ Install the dialect and its HawDB dependency from PyPI:
 python -m pip install sqlalchemy-hawdb
 ```
 
-If HawDB 0.23.0 is not yet available from PyPI, build and install its wheel from
+If you need to build HawDB 0.24.0 from source, build and install its wheel from
 the upstream release tag first:
 
 ```sh
-git clone --branch v0.23.0 https://github.com/nowledge-co/hawdb.git
+git clone --branch v0.24.0 https://github.com/nowledge-co/hawdb.git
 cd hawdb/bindings/python
 python -m pip install maturin==1.15.0
 maturin build --release --out dist
@@ -98,14 +98,14 @@ python -m pytest
 ```
 
 GitHub Actions builds the source distribution and wheel, checks their metadata,
-builds HawDB v0.23.0 from its upstream release tag, and tests the installed
+builds HawDB v0.24.0 from its upstream release tag, and tests the installed
 dialect wheel on Python 3.11-3.13 for every push and pull request.
 
 ## Publishing
 
 `.github/workflows/pypi.yaml` publishes the tested source distribution and wheel
 when a GitHub Release is published. The release tag must match the version in
-`pyproject.toml`, for example `v0.23.0`. A manual workflow dispatch runs the same
+`pyproject.toml`, for example `v0.24.0`. A manual workflow dispatch runs the same
 build and tests without uploading to PyPI.
 
 Configure a PyPI Trusted Publisher for the `sqlalchemy-hawdb` project with:
