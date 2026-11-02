@@ -5,12 +5,19 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Column,
+    Date,
+    DateTime,
+    Enum,
     Float,
     LargeBinary,
     MetaData,
     Numeric,
     String,
     Table,
+    Text,
+    Time,
+    Unicode,
+    UnicodeText,
     Uuid,
     column,
     select,
@@ -72,6 +79,23 @@ def test_type_compiler_uses_hawdb_scalar_types():
 )
 def test_numeric_ddl_preserves_precision_and_scale(type_, expected):
     assert type_.compile(dialect=HawDBDialect()) == expected
+
+
+@pytest.mark.parametrize(
+    "type_",
+    [
+        String(80),
+        Text(80),
+        Unicode(80),
+        UnicodeText(80),
+        Date(),
+        Time(),
+        DateTime(),
+        Enum("short", "longer"),
+    ],
+)
+def test_text_backed_types_compile_without_postgresql_type_modifiers(type_):
+    assert type_.compile(dialect=HawDBDialect()) == "TEXT"
 
 
 @pytest.mark.parametrize(

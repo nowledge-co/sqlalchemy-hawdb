@@ -17,7 +17,7 @@ class HawDBIdentifierPreparer(PGIdentifierPreparer):
     reserved_words = (
         PGIdentifierPreparer.reserved_words
         | IdentifierPreparer.reserved_words
-        | {"match", "return", "graph"}
+        | {"lateral", "match", "return", "graph"}
     )
 
 
@@ -28,13 +28,19 @@ class HawDBTypeCompiler(PGTypeCompiler):
     visit_small_integer = PGTypeCompiler.visit_big_integer
     visit_float = PGTypeCompiler.visit_double
     visit_real = PGTypeCompiler.visit_double
-    visit_string = PGTypeCompiler.visit_text
-    visit_unicode = PGTypeCompiler.visit_text
     visit_uuid = PGTypeCompiler.visit_UUID
-    visit_date = PGTypeCompiler.visit_text
-    visit_time = PGTypeCompiler.visit_text
-    visit_datetime = PGTypeCompiler.visit_text
-    visit_enum = PGTypeCompiler.visit_text
+
+    def visit_string(self, type_, **kw):
+        # HawDB stores these values as unbounded TEXT, without type modifiers.
+        return super().visit_TEXT(types.Text(), **kw)
+
+    visit_text = visit_string
+    visit_unicode = visit_string
+    visit_unicode_text = visit_string
+    visit_date = visit_string
+    visit_time = visit_string
+    visit_datetime = visit_string
+    visit_enum = visit_string
 
     def visit_NUMERIC(self, type_, **kw):
         if type_.precision is None and type_.scale is not None:
