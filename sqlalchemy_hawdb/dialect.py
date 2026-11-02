@@ -4,57 +4,45 @@ from __future__ import annotations
 
 import importlib
 
+from sqlalchemy import types
+from sqlalchemy.dialects.postgresql.base import PGIdentifierPreparer, PGTypeCompiler
 from sqlalchemy.engine import default
 from sqlalchemy.pool import NullPool, SingletonThreadPool
-from sqlalchemy.sql.compiler import GenericTypeCompiler, IdentifierPreparer
+from sqlalchemy.sql.compiler import IdentifierPreparer
 
 
-class HawDBIdentifierPreparer(IdentifierPreparer):
-    """Quote identifiers using SQL-standard double quotes."""
+class HawDBIdentifierPreparer(PGIdentifierPreparer):
+    """Extend PostgreSQL identifier quoting with HawDB's graph keywords."""
 
-    reserved_words = IdentifierPreparer.reserved_words | {"match", "return", "graph"}
+    reserved_words = (
+        PGIdentifierPreparer.reserved_words
+        | IdentifierPreparer.reserved_words
+        | {"match", "return", "graph"}
+    )
 
 
-class HawDBTypeCompiler(GenericTypeCompiler):
+class HawDBTypeCompiler(PGTypeCompiler):
     """Compile SQLAlchemy types to HawDB's supported PostgreSQL type subset."""
 
-    def visit_big_integer(self, type_, **kw):
-        return "BIGINT"
+    visit_integer = PGTypeCompiler.visit_big_integer
+    visit_small_integer = PGTypeCompiler.visit_big_integer
+    visit_float = PGTypeCompiler.visit_double
+    visit_real = PGTypeCompiler.visit_double
+    visit_string = PGTypeCompiler.visit_text
+    visit_unicode = PGTypeCompiler.visit_text
+    visit_uuid = PGTypeCompiler.visit_UUID
+    visit_date = PGTypeCompiler.visit_text
+    visit_time = PGTypeCompiler.visit_text
+    visit_datetime = PGTypeCompiler.visit_text
+    visit_enum = PGTypeCompiler.visit_text
 
-    visit_integer = visit_big_integer
-    visit_small_integer = visit_big_integer
+    def visit_NUMERIC(self, type_, **kw):
+        if type_.precision is None and type_.scale is not None:
+            # HawDB's bare NUMERIC defaults to scale zero, unlike PostgreSQL.
+            type_ = types.NUMERIC(precision=38, scale=type_.scale)
+        return super().visit_NUMERIC(type_, **kw)
 
-    def visit_boolean(self, type_, **kw):
-        return "BOOLEAN"
-
-    def visit_double(self, type_, **kw):
-        return "DOUBLE PRECISION"
-
-    visit_float = visit_double
-    visit_real = visit_double
-    visit_numeric = visit_double
-
-    def visit_string(self, type_, **kw):
-        return "TEXT"
-
-    visit_text = visit_string
-    visit_unicode = visit_string
-    visit_unicode_text = visit_string
-
-    def visit_large_binary(self, type_, **kw):
-        return "BYTEA"
-
-    def visit_uuid(self, type_, **kw):
-        return "UUID"
-
-    def visit_date(self, type_, **kw):
-        return "TEXT"
-
-    visit_time = visit_date
-    visit_datetime = visit_date
-
-    def visit_enum(self, type_, **kw):
-        return "TEXT"
+    visit_DECIMAL = visit_NUMERIC
 
 
 class HawDBDialect(default.DefaultDialect):
@@ -62,6 +50,7 @@ class HawDBDialect(default.DefaultDialect):
     driver = "embedded"
     supports_statement_cache = True
     supports_native_boolean = True
+    supports_native_decimal = True
     supports_native_uuid = True
     supports_sane_rowcount = False
     supports_sane_multi_rowcount = False
@@ -83,7 +72,7 @@ class HawDBDialect(default.DefaultDialect):
         except ImportError as error:
             raise ImportError(
                 "HawDB's Python binding is required; install it with "
-                "python -m pip install 'hawdb>=0.24.0,<0.25.0'"
+                "python -m pip install 'hawdb>=0.25.0,<0.26.0'"
             ) from error
 
     def create_connect_args(self, url):
@@ -168,7 +157,8 @@ class HawDBDialect(default.DefaultDialect):
         if schema not in (None, "public"):
             return []
         result = connection.exec_driver_sql(
-            "SELECT column_name, data_type, is_nullable, column_default "
+            "SELECT column_name, data_type, is_nullable, column_default, "
+            "numeric_precision, numeric_scale "
             "FROM information_schema.columns "
             "WHERE table_schema = 'public' AND table_name = $1 "
             "ORDER BY ordinal_position",
@@ -177,7 +167,7 @@ class HawDBDialect(default.DefaultDialect):
         return [
             {
                 "name": row[0],
-                "type": self._type_from_name(row[1]),
+                "type": self._type_from_name(row[1], row[4], row[5]),
                 "nullable": row[2] == "YES",
                 "default": row[3],
                 "autoincrement": False,
@@ -296,13 +286,15 @@ class HawDBDialect(default.DefaultDialect):
         return result
 
     @staticmethod
-    def _type_from_name(name: str):
-        from sqlalchemy import types
-
+    def _type_from_name(
+        name: str, precision: int | None = None, scale: int | None = None
+    ):
         normalized = name.lower()
         if normalized in {"smallint", "integer", "bigint"}:
             return types.Integer()
-        if normalized in {"real", "double precision", "numeric", "decimal"}:
+        if normalized in {"numeric", "decimal"}:
+            return types.Numeric(precision=precision, scale=scale)
+        if normalized in {"real", "double precision"}:
             return types.Float()
         if normalized in {"boolean", "bool"}:
             return types.Boolean()
