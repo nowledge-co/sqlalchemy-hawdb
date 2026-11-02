@@ -1,7 +1,12 @@
+from decimal import Decimal
+
+import pytest
 from sqlalchemy import (
     Column,
+    Float,
     Integer,
     MetaData,
+    Numeric,
     String,
     Table,
     UniqueConstraint,
@@ -10,6 +15,7 @@ from sqlalchemy import (
     select,
 )
 from sqlalchemy.engine import URL
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, declarative_base
 
 
@@ -119,5 +125,166 @@ def test_in_memory_database_survives_connection_checkin():
             assert (
                 connection.exec_driver_sql("SELECT id FROM scratch").scalar_one() == 9
             )
+    finally:
+        engine.dispose()
+
+
+def test_native_decimal_round_trip_reflection_and_reopen(tmp_path):
+    path = tmp_path / "decimal.hawdb"
+    engine = make_engine(path)
+    metadata = MetaData()
+    amounts = Table(
+        "amounts",
+        metadata,
+        Column("id", Integer, primary_key=True, autoincrement=False),
+        Column("amount", Numeric(38, 4)),
+        Column("ratio", Float),
+    )
+    amount = Decimal("9007199254740993.0100")
+    try:
+        metadata.create_all(engine)
+        with engine.begin() as connection:
+            connection.execute(
+                amounts.insert(),
+                [
+                    {"id": 1, "amount": amount, "ratio": 0.125},
+                    {"id": 2, "amount": None, "ratio": None},
+                ],
+            )
+        with engine.connect() as connection:
+            rows = connection.execute(select(amounts).order_by(amounts.c.id)).all()
+            assert rows == [(1, amount, 0.125), (2, None, None)]
+            assert isinstance(rows[0].amount, Decimal)
+            assert str(rows[0].amount) == str(amount)
+            assert isinstance(rows[0].ratio, float)
+
+        with engine.begin() as connection:
+            connection.execute(
+                amounts.update()
+                .where(amounts.c.id == 1)
+                .values(amount=amounts.c.amount + Decimal("0.0001"))
+            )
+    finally:
+        engine.dispose()
+
+    reopened = make_engine(path)
+    try:
+        columns = inspect(reopened).get_columns("amounts")
+        numeric_type = columns[1]["type"]
+        assert isinstance(numeric_type, Numeric)
+        assert not isinstance(numeric_type, Float)
+        assert (numeric_type.precision, numeric_type.scale) == (38, 4)
+        assert isinstance(columns[2]["type"], Float)
+
+        reflected_amounts = Table(
+            "amounts",
+            MetaData(),
+            Column("id", Integer, primary_key=True, autoincrement=False),
+            Column("amount", numeric_type),
+        )
+        with reopened.begin() as connection:
+            connection.execute(reflected_amounts.insert(), {"id": 3, "amount": amount})
+        with reopened.connect() as connection:
+            values = connection.scalars(
+                select(reflected_amounts.c.amount).order_by(reflected_amounts.c.id)
+            ).all()
+            assert values == [Decimal("9007199254740993.0101"), None, amount]
+            assert str(values[0]) == "9007199254740993.0101"
+            assert str(values[2]) == str(amount)
+    finally:
+        reopened.dispose()
+
+
+@pytest.mark.parametrize("asdecimal", [True, False])
+def test_numeric_rounding_and_result_modes(tmp_path, asdecimal):
+    engine = make_engine(tmp_path / "rounding.hawdb")
+    metadata = MetaData()
+    amounts = Table(
+        "amounts",
+        metadata,
+        Column("id", Integer, primary_key=True, autoincrement=False),
+        Column("amount", Numeric(12, 2, asdecimal=asdecimal)),
+    )
+    try:
+        metadata.create_all(engine)
+        with engine.begin() as connection:
+            connection.execute(
+                amounts.insert(),
+                [
+                    {"id": 1, "amount": Decimal("1.235")},
+                    {"id": 2, "amount": Decimal("-1.235")},
+                ],
+            )
+        with engine.connect() as connection:
+            values = connection.scalars(
+                select(amounts.c.amount).order_by(amounts.c.id)
+            ).all()
+            if asdecimal:
+                assert values == [Decimal("1.24"), Decimal("-1.24")]
+                assert all(isinstance(value, Decimal) for value in values)
+            else:
+                assert values == [1.24, -1.24]
+                assert all(isinstance(value, float) for value in values)
+    finally:
+        engine.dispose()
+
+
+def test_decimal_overflow_leaves_stored_value_unchanged(tmp_path):
+    engine = make_engine(tmp_path / "overflow.hawdb")
+    metadata = MetaData()
+    amounts = Table(
+        "amounts",
+        metadata,
+        Column("id", Integer, primary_key=True, autoincrement=False),
+        Column("amount", Numeric(5, 2)),
+    )
+    try:
+        metadata.create_all(engine)
+        with engine.begin() as connection:
+            connection.execute(amounts.insert(), {"id": 1, "amount": Decimal("12.34")})
+        with engine.begin() as connection:
+            with pytest.raises(DBAPIError, match="decimal result exceeds"):
+                connection.execute(
+                    amounts.update()
+                    .where(amounts.c.id == 1)
+                    .values(amount=Decimal("9999.99"))
+                )
+            assert connection.scalar(select(amounts.c.amount)) == Decimal("12.34")
+        with engine.connect() as connection:
+            assert connection.scalar(select(amounts.c.amount)) == Decimal("12.34")
+    finally:
+        engine.dispose()
+
+
+def test_keyless_tables_preserve_duplicates_defaults_and_reflection(tmp_path):
+    engine = make_engine(tmp_path / "keyless.hawdb")
+    metadata = MetaData()
+    events = Table(
+        "events",
+        metadata,
+        Column("name", String),
+        Column("state", String, nullable=False, server_default="new"),
+    )
+    try:
+        metadata.create_all(engine)
+        with engine.begin() as connection:
+            connection.execute(events.insert(), [{"name": "same"}, {"name": "same"}])
+            connection.exec_driver_sql("INSERT INTO events VALUES ('implicit')")
+        with engine.connect() as connection:
+            assert connection.execute(select(events).order_by(events.c.name)).all() == [
+                ("implicit", "new"),
+                ("same", "new"),
+                ("same", "new"),
+            ]
+        inspector = inspect(engine)
+        assert [column["name"] for column in inspector.get_columns("events")] == [
+            "name",
+            "state",
+        ]
+        assert inspector.get_pk_constraint("events") == {
+            "name": None,
+            "constrained_columns": [],
+        }
+        assert inspector.get_indexes("events") == []
     finally:
         engine.dispose()

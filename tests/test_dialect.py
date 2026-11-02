@@ -1,12 +1,24 @@
+import pytest
 from sqlalchemy import (
+    DECIMAL,
+    NUMERIC,
     BigInteger,
     Boolean,
     Column,
+    Date,
+    DateTime,
+    Enum,
+    Float,
     LargeBinary,
     MetaData,
     Numeric,
     String,
     Table,
+    Text,
+    Time,
+    Unicode,
+    UnicodeText,
+    Uuid,
     column,
     select,
     table,
@@ -37,17 +49,64 @@ def test_type_compiler_uses_hawdb_scalar_types():
             Column("id", BigInteger, primary_key=True),
             Column("enabled", Boolean),
             Column("amount", Numeric(12, 3)),
+            Column("ratio", Float),
             Column("label", String(40)),
             Column("payload", LargeBinary),
+            Column("token", Uuid),
         )
     ).compile(dialect=HawDBDialect())
 
     sql = str(statement)
     assert "id BIGINT" in sql
     assert "enabled BOOLEAN" in sql
-    assert "amount DOUBLE PRECISION" in sql
+    assert "amount NUMERIC(12, 3)" in sql
+    assert "ratio DOUBLE PRECISION" in sql
     assert "label TEXT" in sql
     assert "payload BYTEA" in sql
+    assert "token UUID" in sql
+
+
+@pytest.mark.parametrize(
+    ("type_", "expected"),
+    [
+        (Numeric(), "NUMERIC"),
+        (Numeric(18), "NUMERIC(18)"),
+        (Numeric(scale=4), "NUMERIC(38, 4)"),
+        (Numeric(38, 4), "NUMERIC(38, 4)"),
+        (NUMERIC(18, 6), "NUMERIC(18, 6)"),
+        (DECIMAL(18, 6), "NUMERIC(18, 6)"),
+    ],
+)
+def test_numeric_ddl_preserves_precision_and_scale(type_, expected):
+    assert type_.compile(dialect=HawDBDialect()) == expected
+
+
+@pytest.mark.parametrize(
+    "type_",
+    [
+        String(80),
+        Text(80),
+        Unicode(80),
+        UnicodeText(80),
+        Date(),
+        Time(),
+        DateTime(),
+        Enum("short", "longer"),
+    ],
+)
+def test_text_backed_types_compile_without_postgresql_type_modifiers(type_):
+    assert type_.compile(dialect=HawDBDialect()) == "TEXT"
+
+
+@pytest.mark.parametrize(
+    "name", ["current_user", "lateral", "graph", "match", "return"]
+)
+def test_postgresql_and_hawdb_reserved_identifiers_are_quoted(name):
+    statement = select(column(name)).select_from(table("widgets"))
+
+    compiled = str(statement.compile(dialect=HawDBDialect()))
+
+    assert f'SELECT "{name}"' in compiled
 
 
 def test_url_uses_path_and_read_only_option():

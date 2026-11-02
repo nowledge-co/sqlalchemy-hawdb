@@ -4,10 +4,15 @@
 database. It uses HawDB's own PEP 249 driver and does not add a wire protocol or
 duplicate its DBAPI implementation.
 
+The dialect reuses SQLAlchemy's PostgreSQL type compiler and identifier
+preparer, overriding HawDB's scalar type mappings and bounded numeric defaults.
+Connection handling, transactions, and catalog queries use the embedded HawDB
+driver and its supported SQL subset.
+
 ## Requirements
 
 - Python 3.11 or newer
-- HawDB Python binding 0.24.x (CI tests 0.24.0)
+- HawDB Python binding 0.25.x (CI tests 0.25.0)
 - SQLAlchemy 2.x
 
 Install the dialect and its HawDB dependency from PyPI:
@@ -16,11 +21,11 @@ Install the dialect and its HawDB dependency from PyPI:
 python -m pip install sqlalchemy-hawdb
 ```
 
-If you need to build HawDB 0.24.0 from source, build and install its wheel from
+If you need to build HawDB 0.25.0 from source, build and install its wheel from
 the upstream release tag first:
 
 ```sh
-git clone --branch v0.24.0 https://github.com/nowledge-co/hawdb.git
+git clone --branch v0.25.0 https://github.com/nowledge-co/hawdb.git
 cd hawdb/bindings/python
 python -m pip install maturin==1.15.0
 maturin build --release --out dist
@@ -76,10 +81,44 @@ also be used serially within that thread.
 - Table, column, primary key, unique constraint, and index reflection from
   HawDB's `information_schema` and `pg_catalog` views
 - The default `public` schema
-- HawDB-native scalar DDL types: integer types map to `BIGINT`, floating and
-  numeric types to `DOUBLE PRECISION`, strings to `TEXT`, and binary values to
-  `BYTEA`; SQLAlchemy string lengths and numeric precision are not enforced by
-  HawDB
+- HawDB-native scalar DDL types: integer types map to `BIGINT`, floating types
+  to `DOUBLE PRECISION`, strings to `TEXT`, and binary values to `BYTEA`;
+  SQLAlchemy string lengths are not enforced by HawDB
+- Native `Numeric`, `NUMERIC`, and `DECIMAL` columns with exact Python
+  `decimal.Decimal` binding and precision/scale reflection
+- SQLAlchemy Core tables without primary keys, including duplicate rows;
+  HawDB's hidden row handles are not SQL columns or generated primary keys,
+  and SQLAlchemy ORM mappings still require an application-visible primary key
+
+### Exact numeric values
+
+Use `Numeric(precision, scale)` and Python `decimal.Decimal` for exact values.
+For example, `Numeric(38, 4)` preserves `Decimal("9007199254740993.0100")`
+without converting it to a Python float. Reflected numeric columns retain
+their declared precision and scale. `Numeric(asdecimal=False)` explicitly
+converts results to Python floats; floating-point columns remain approximate.
+
+HawDB supports precision from 1 through 38 and scale from 0 through precision.
+Omitted precision defaults to 38 and omitted scale to 0, so bare `Numeric()`
+has `NUMERIC(38, 0)` semantics and `Numeric(scale=4)` uses `NUMERIC(38, 4)`.
+Column assignment rounds to the declared scale with ties away from zero and
+rejects precision overflow. Decimal/`DOUBLE PRECISION` arithmetic and comparisons require an
+explicit `CAST`; this bounded numeric contract does not provide PostgreSQL's
+arbitrary-precision numeric semantics.
+
+### Upgrading from 0.24
+
+HawDB 0.25 changes its relational durable storage formats. Older development
+database formats are rejected and must be recreated; this dialect provides no
+automatic migration. Preserve any data needed from an older database before
+recreating it. See the upstream
+[compatibility notes](https://github.com/nowledge-co/hawdb/pull/1474).
+
+`Numeric` now creates native `NUMERIC` columns instead of `DOUBLE PRECISION`.
+Existing floating-point values do not regain precision by changing their
+SQLAlchemy type declaration.
+
+### Limitations
 
 HawDB does not report affected row counts, so DBAPI `rowcount` is `-1` for
 statements without a result set. Date and time types compile to `TEXT`; their
@@ -98,14 +137,14 @@ python -m pytest
 ```
 
 GitHub Actions builds the source distribution and wheel, checks their metadata,
-builds HawDB v0.24.0 from its upstream release tag, and tests the installed
+builds HawDB v0.25.0 from its upstream release tag, and tests the installed
 dialect wheel on Python 3.11-3.13 for every push and pull request.
 
 ## Publishing
 
 `.github/workflows/pypi.yaml` publishes the tested source distribution and wheel
 when a GitHub Release is published. The release tag must match the version in
-`pyproject.toml`, for example `v0.24.0`. A manual workflow dispatch runs the same
+`pyproject.toml`, for example `v0.25.0`. A manual workflow dispatch runs the same
 build and tests without uploading to PyPI.
 
 Configure a PyPI Trusted Publisher for the `sqlalchemy-hawdb` project with:
