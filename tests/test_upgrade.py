@@ -18,6 +18,7 @@ def test_025_database_reopens_and_accepts_writes_in_026(tmp_path, close_mode):
     fixture_script = Path(__file__).parent / "fixtures" / "create_025_database.py"
     fixture = subprocess.run(
         [previous_python, str(fixture_script), str(path), close_mode],
+        check=False,
         capture_output=True,
         text=True,
         timeout=60,

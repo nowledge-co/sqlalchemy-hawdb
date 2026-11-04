@@ -24,6 +24,16 @@ def make_engine(path):
     return create_engine(URL.create("hawdb", database=str(path)))
 
 
+def test_engine_initializes_version_and_default_schema(tmp_path):
+    engine = make_engine(tmp_path / "initialization.hawdb")
+    try:
+        with engine.connect() as connection:
+            assert engine.dialect.server_version_info[:2] == (0, 26)
+            assert inspect(connection).default_schema_name == "public"
+    finally:
+        engine.dispose()
+
+
 def test_core_create_insert_select_and_reflection(tmp_path):
     engine = make_engine(tmp_path / "core.hawdb")
     metadata = MetaData()
@@ -346,13 +356,13 @@ def test_repeated_dml_rebinds_parameters_and_preserves_rollback(tmp_path):
         with engine.connect() as connection:
             connection.execute(
                 update_account,
-                {"target_id": 2, "delta": 999.0, "exact_delta": Decimal("999")},
+                {"target_id": 2, "delta": 999.0, "exact_delta": Decimal(999)},
             )
             connection.rollback()
             connection.execute(delete_account, {"target_id": 999})
             connection.execute(delete_account, {"target_id": 1})
             connection.execute(
-                insert_account, {"id": 3, "balance": 30.0, "amount": Decimal("30")}
+                insert_account, {"id": 3, "balance": 30.0, "amount": Decimal(30)}
             )
             connection.commit()
 
