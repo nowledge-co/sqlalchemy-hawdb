@@ -78,7 +78,7 @@ class HawDBDialect(default.DefaultDialect):
         except ImportError as error:
             raise ImportError(
                 "HawDB's Python binding is required; install it with "
-                "python -m pip install 'hawdb>=0.25.0,<0.26.0'"
+                "python -m pip install 'hawdb>=0.26.0,<0.27.0'"
             ) from error
 
     def create_connect_args(self, url):
