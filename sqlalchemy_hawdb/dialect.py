@@ -78,7 +78,7 @@ class HawDBDialect(default.DefaultDialect):
         except ImportError as error:
             raise ImportError(
                 "HawDB's Python binding is required; install it with "
-                "python -m pip install 'hawdb>=0.25.0,<0.26.0'"
+                "python -m pip install 'hawdb>=0.26.0,<0.27.0'"
             ) from error
 
     def create_connect_args(self, url):
@@ -118,12 +118,12 @@ class HawDBDialect(default.DefaultDialect):
             return SingletonThreadPool
         return NullPool
 
-    def get_server_version_info(self, connection):
+    def _get_server_version_info(self, connection):
         import hawdb
 
         return tuple(int(part) for part in hawdb.__version__.split(".")[:3])
 
-    def get_default_schema_name(self, connection):
+    def _get_default_schema_name(self, connection):
         return "public"
 
     def get_schema_names(self, connection, **kw):

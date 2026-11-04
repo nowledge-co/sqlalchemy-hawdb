@@ -10,6 +10,7 @@ from sqlalchemy import (
     String,
     Table,
     UniqueConstraint,
+    bindparam,
     create_engine,
     inspect,
     select,
@@ -21,6 +22,16 @@ from sqlalchemy.orm import Session, declarative_base
 
 def make_engine(path):
     return create_engine(URL.create("hawdb", database=str(path)))
+
+
+def test_engine_initializes_version_and_default_schema(tmp_path):
+    engine = make_engine(tmp_path / "initialization.hawdb")
+    try:
+        with engine.connect() as connection:
+            assert engine.dialect.server_version_info[:2] == (0, 26)
+            assert inspect(connection).default_schema_name == "public"
+    finally:
+        engine.dispose()
 
 
 def test_core_create_insert_select_and_reflection(tmp_path):
@@ -288,3 +299,100 @@ def test_keyless_tables_preserve_duplicates_defaults_and_reflection(tmp_path):
         assert inspector.get_indexes("events") == []
     finally:
         engine.dispose()
+
+
+def test_repeated_dml_rebinds_parameters_and_preserves_rollback(tmp_path):
+    engine = make_engine(tmp_path / "dml.hawdb")
+    metadata = MetaData()
+    accounts = Table(
+        "accounts",
+        metadata,
+        Column("id", Integer, primary_key=True, autoincrement=False),
+        Column("balance", Float),
+        Column("amount", Numeric(18, 4)),
+    )
+    insert_account = accounts.insert()
+    update_account = (
+        accounts.update()
+        .where(accounts.c.id == bindparam("target_id"))
+        .values(
+            balance=accounts.c.balance + bindparam("delta", type_=Float),
+            amount=accounts.c.amount + bindparam("exact_delta", type_=Numeric(18, 4)),
+        )
+    )
+    delete_account = accounts.delete().where(accounts.c.id == bindparam("target_id"))
+    try:
+        metadata.create_all(engine)
+        with engine.begin() as connection:
+            for identifier, initial in ((1, 10), (2, 20)):
+                connection.execute(
+                    insert_account,
+                    {
+                        "id": identifier,
+                        "balance": float(initial),
+                        "amount": Decimal(initial),
+                    },
+                )
+            for identifier, delta, exact_delta in (
+                (1, 0.5, "0.1250"),
+                (2, 1.5, "0.2500"),
+                (1, 2.0, "0.1250"),
+            ):
+                connection.execute(
+                    update_account,
+                    {
+                        "target_id": identifier,
+                        "delta": delta,
+                        "exact_delta": Decimal(exact_delta),
+                    },
+                )
+            assert connection.execute(
+                select(accounts).order_by(accounts.c.id)
+            ).all() == [
+                (1, 12.5, Decimal("10.2500")),
+                (2, 21.5, Decimal("20.2500")),
+            ]
+
+        with engine.connect() as connection:
+            connection.execute(
+                update_account,
+                {"target_id": 2, "delta": 999.0, "exact_delta": Decimal(999)},
+            )
+            connection.rollback()
+            connection.execute(delete_account, {"target_id": 999})
+            connection.execute(delete_account, {"target_id": 1})
+            connection.execute(
+                insert_account, {"id": 3, "balance": 30.0, "amount": Decimal(30)}
+            )
+            connection.commit()
+
+        with engine.connect() as connection:
+            assert connection.execute(
+                select(accounts).order_by(accounts.c.id)
+            ).all() == [
+                (2, 21.5, Decimal("20.2500")),
+                (3, 30.0, Decimal("30.0000")),
+            ]
+    finally:
+        engine.dispose()
+
+
+def test_namespace_anchor_connect_args_and_read_only_reopen(tmp_path):
+    url = URL.create("hawdb", database=str(tmp_path / "anchored.hawdb"))
+    engine = create_engine(url, connect_args={"namespace_durability_anchor": tmp_path})
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql("CREATE TABLE records (id BIGINT PRIMARY KEY)")
+            connection.exec_driver_sql("INSERT INTO records (id) VALUES ($1)", (7,))
+    finally:
+        engine.dispose()
+
+    read_only = create_engine(
+        url.update_query_dict({"read_only": "true"}),
+        connect_args={"namespace_durability_anchor": str(tmp_path)},
+    )
+    try:
+        with read_only.connect() as connection:
+            assert connection.exec_driver_sql("SELECT id FROM records").all() == [(7,)]
+    finally:
+        read_only.dispose()
