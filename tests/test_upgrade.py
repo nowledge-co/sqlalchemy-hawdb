@@ -9,15 +9,23 @@ from sqlalchemy.engine import URL
 
 
 @pytest.mark.parametrize("close_mode", ["close", "process_exit"])
-def test_025_database_reopens_and_accepts_writes_in_026(tmp_path, close_mode):
-    previous_python = os.environ.get("HAWDB_PREVIOUS_PYTHON")
+@pytest.mark.parametrize(
+    ("previous_version", "interpreter_env"),
+    [("0.25.0", "HAWDB_PREVIOUS_PYTHON"), ("0.26.0", "HAWDB_026_PYTHON")],
+)
+def test_previous_database_reopens_and_accepts_writes_in_current_release(
+    tmp_path, close_mode, previous_version, interpreter_env
+):
+    previous_python = os.environ.get(interpreter_env)
     if previous_python is None:
-        pytest.skip("Set HAWDB_PREVIOUS_PYTHON to an isolated HawDB 0.25 interpreter")
+        pytest.skip(
+            f"Set {interpreter_env} to an isolated HawDB {previous_version} interpreter"
+        )
 
     path = tmp_path / "upgrade.hawdb"
-    fixture_script = Path(__file__).parent / "fixtures" / "create_025_database.py"
+    fixture_script = Path(__file__).parent / "fixtures" / "create_previous_database.py"
     fixture = subprocess.run(
-        [previous_python, str(fixture_script), str(path), close_mode],
+        [previous_python, str(fixture_script), str(path), close_mode, previous_version],
         check=False,
         capture_output=True,
         text=True,

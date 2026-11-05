@@ -1,4 +1,4 @@
-"""Create release-specific databases in an isolated HawDB 0.25 process."""
+"""Create release-specific databases in an isolated previous-version process."""
 
 import os
 import sys
@@ -9,7 +9,7 @@ import hawdb
 
 
 def main():
-    assert version("hawdb") == "0.25.0"
+    assert version("hawdb") == sys.argv[3]
     database = hawdb.open(sys.argv[1])
     database.execute_sql(
         "CREATE TABLE accounts (id BIGINT PRIMARY KEY, amount NUMERIC(38,4), "

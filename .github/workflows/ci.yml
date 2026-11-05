@@ -11,14 +11,18 @@ permissions:
 
 jobs:
   build-hawdb:
-    name: Build HawDB v0.26.0 wheel
+    name: Build HawDB v${{ matrix.hawdb-version }} wheel
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        hawdb-version: ["0.26.0", "0.27.0"]
     steps:
-      - name: Check out HawDB v0.26.0
+      - name: Check out HawDB v${{ matrix.hawdb-version }}
         uses: actions/checkout@v4
         with:
           repository: nowledge-co/hawdb
-          ref: v0.26.0
+          ref: v${{ matrix.hawdb-version }}
           path: .ci/hawdb
           persist-credentials: false
 
@@ -44,7 +48,7 @@ jobs:
       - name: Upload HawDB Python wheel
         uses: actions/upload-artifact@v4
         with:
-          name: hawdb-v0.26.0-python-wheel
+          name: hawdb-v${{ matrix.hawdb-version }}-python-wheel
           path: .ci/hawdb/bindings/python/dist/*.whl
           if-no-files-found: error
 
@@ -114,7 +118,7 @@ jobs:
           if-no-files-found: error
 
   test:
-    name: HawDB v0.26.0 / Python ${{ matrix.python-version }} / SQLAlchemy ${{ matrix.sqlalchemy-version }}
+    name: HawDB v0.27.0 / Python ${{ matrix.python-version }} / SQLAlchemy ${{ matrix.sqlalchemy-version }} / ${{ matrix.hawdb-artifact }}
     needs: [build, build-hawdb]
     runs-on: ubuntu-latest
     strategy:
@@ -122,6 +126,11 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
         sqlalchemy-version: ["2.0", "2.1"]
+        hawdb-artifact: ["source"]
+        include:
+          - python-version: "3.11"
+            sqlalchemy-version: "2.1"
+            hawdb-artifact: "pypi"
     steps:
       - name: Check out sqlalchemy_hawdb
         uses: actions/checkout@v4
@@ -140,21 +149,37 @@ jobs:
           path: dist
 
       - name: Download HawDB wheel
+        if: matrix.hawdb-artifact == 'source'
+        uses: actions/download-artifact@v4
+        with:
+          name: hawdb-v0.27.0-python-wheel
+          path: hawdb-dist
+
+      - name: Download HawDB 0.26 wheel for upgrade fixtures
         uses: actions/download-artifact@v4
         with:
           name: hawdb-v0.26.0-python-wheel
-          path: hawdb-dist
+          path: hawdb-previous-dist
 
       - name: Install the dialect wheel and HawDB
+        env:
+          HAWDB_ARTIFACT: ${{ matrix.hawdb-artifact }}
         run: |
           wheels=(dist/*.whl)
-          hawdb_wheels=(hawdb-dist/*.whl)
-          python -m pip install --only-binary=hawdb "${hawdb_wheels[0]}" "${wheels[0]}[test]" 'SQLAlchemy~=${{ matrix.sqlalchemy-version }}.0'
+          hawdb_requirement='hawdb==0.27.0'
+          if [[ "$HAWDB_ARTIFACT" == 'source' ]]; then
+            hawdb_wheels=(hawdb-dist/*.whl)
+            hawdb_requirement="${hawdb_wheels[0]}"
+          fi
+          python -m pip install --only-binary=hawdb "$hawdb_requirement" "${wheels[0]}[test]" 'SQLAlchemy~=${{ matrix.sqlalchemy-version }}.0'
 
-      - name: Install the previous HawDB release for upgrade fixtures
+      - name: Install previous HawDB releases for upgrade fixtures
         run: |
           python -m venv "$RUNNER_TEMP/hawdb-0.25"
           "$RUNNER_TEMP/hawdb-0.25/bin/python" -m pip install --only-binary=hawdb 'hawdb==0.25.0'
+          python -m venv "$RUNNER_TEMP/hawdb-0.26"
+          previous_hawdb_wheels=(hawdb-previous-dist/*.whl)
+          "$RUNNER_TEMP/hawdb-0.26/bin/python" -m pip install --only-binary=hawdb "${previous_hawdb_wheels[0]}"
 
       - name: Verify HawDB binding package
         working-directory: ${{ runner.temp }}
@@ -165,7 +190,7 @@ jobs:
           import hawdb
           from sqlalchemy_hawdb import HawDBDialect
 
-          assert version("hawdb") == "0.26.0"
+          assert version("hawdb") == "0.27.0"
           assert version("SQLAlchemy").startswith("${{ matrix.sqlalchemy-version }}.")
           assert callable(hawdb.open)
           assert callable(HawDBDialect.import_dbapi().connect)
@@ -176,4 +201,5 @@ jobs:
         working-directory: ${{ runner.temp }}
         env:
           HAWDB_PREVIOUS_PYTHON: ${{ runner.temp }}/hawdb-0.25/bin/python
+          HAWDB_026_PYTHON: ${{ runner.temp }}/hawdb-0.26/bin/python
         run: python -m pytest "$GITHUB_WORKSPACE/tests"
