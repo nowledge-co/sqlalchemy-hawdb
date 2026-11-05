@@ -12,7 +12,7 @@ driver and its supported SQL subset.
 ## Requirements
 
 - Python 3.11 or newer
-- HawDB Python binding 0.26.x (CI tests 0.26.0)
+- HawDB Python binding 0.27.x (CI tests 0.27.0)
 - SQLAlchemy 2.x (CI tests both 2.0.x and 2.1.x)
 
 Install the dialect and its HawDB dependency from PyPI:
@@ -21,11 +21,11 @@ Install the dialect and its HawDB dependency from PyPI:
 python -m pip install sqlalchemy-hawdb
 ```
 
-If HawDB 0.26.0 is not available on your package index, build and install its
-wheel from the upstream release tag first:
+To build HawDB 0.27.0 from source, build and install its wheel from the upstream
+release tag first:
 
 ```sh
-git clone --branch v0.26.0 https://github.com/nowledge-co/hawdb.git
+git clone --branch v0.27.0 https://github.com/nowledge-co/hawdb.git
 cd hawdb/bindings/python
 python -m pip install maturin==1.15.0
 maturin build --release --out dist
@@ -94,7 +94,7 @@ stable while the database is open. A Windows host can obtain the user's
 OS-provisioned LocalAppData path through the known-folder API. Pass the same
 anchor on read-only reopens. The default remains `None`; the dialect does not
 infer an anchor from directory existence or a permission error. See the
-[upstream host contract](https://github.com/nowledge-co/hawdb/blob/v0.26.0/bindings/python/README.md).
+[upstream host contract](https://github.com/nowledge-co/hawdb/blob/v0.27.0/bindings/python/README.md).
 
 ## Supported behavior
 
@@ -129,9 +129,21 @@ rejects precision overflow. Decimal/`DOUBLE PRECISION` arithmetic and comparison
 require an explicit `CAST`; this bounded numeric contract does not provide PostgreSQL's
 arbitrary-precision numeric semantics.
 
-### HawDB 0.26 compatibility
+### HawDB 0.27 compatibility
 
-HawDB 0.26 uses PEG for its supported SQL grammar and retains bounded,
+HawDB 0.27 retains the Python DB-API, value conversions, and connection contract
+from 0.26. Its Python packaging fix restores published wheels on PyPI, which CI
+checks separately from wheels built from the release tag.
+
+The release adds scalar-expression regex predicates to Cypher and changes
+lexical search admission: the default scored-term cap is 64 and the analyzed-
+term cap is 1024. Hosts using the Rust search API can explicitly opt into the
+lossy `MostSelective` policy; the Python 0.27 connection API does not expose
+that policy. These graph/search changes do not add relational SQL regex
+operators or dialect connection options. See the
+[0.27 release notes](https://github.com/nowledge-co/hawdb/releases/tag/v0.27.0).
+
+Since 0.26, HawDB uses PEG for its supported SQL grammar and retains bounded,
 schema-neutral templates for repeated parameterized INSERT, UPDATE, and DELETE
 statements. SQLAlchemy's compiled-statement cache and HawDB's syntax-template
 cache remain separate; values are bound for every execution. UPDATE arithmetic
@@ -139,11 +151,11 @@ works with typed DOUBLE and Decimal parameters, with the explicit-cast rules
 above. These engine changes do not imply support for the entire PostgreSQL
 grammar.
 
-CI creates persistent databases with the released HawDB 0.25.0 wheel in an
-isolated interpreter, then checks reads, indexes, Decimal scale, duplicate
-keyless rows, new writes, and reopen using 0.26. Both normal close and abrupt
-process exit after committed writes are covered. This is a focused default-
-configuration upgrade fixture, not a migration facility for older formats.
+CI creates persistent databases in isolated HawDB 0.25.0 and 0.26.0
+interpreters, then checks reads, indexes, Decimal scale, duplicate keyless rows,
+new writes, and reopen using 0.27. Both normal close and abrupt process exit
+after committed writes are covered. This is a focused default-configuration
+upgrade fixture, not a migration facility for older formats.
 
 ### Upgrading from 0.24
 
@@ -176,12 +188,18 @@ python -m pytest
 ```
 
 GitHub Actions builds the source distribution and wheel, checks their metadata,
-builds HawDB v0.26.0 from its upstream release tag, and tests the installed
+builds HawDB v0.27.0 from its upstream release tag, and tests the installed
 dialect wheel on Python 3.11-3.13 with SQLAlchemy 2.0.x and 2.1.x for every push
-and pull request. The six test jobs also install HawDB 0.25.0 in a separate
-interpreter for cross-version data fixtures. To include those fixtures locally,
-set `HAWDB_PREVIOUS_PYTHON` to an interpreter containing exactly `hawdb==0.25.0`.
-The upgrade tests are skipped when that interpreter is not configured.
+and pull request. An additional Python 3.11 / SQLAlchemy 2.1 job runs the same
+tests with HawDB's published PyPI wheel instead of the source-built wheel.
+All jobs run on Linux.
+
+Each test job also installs HawDB 0.25.0 from PyPI and HawDB 0.26.0 from its
+release tag in separate interpreters for cross-version data fixtures. Version
+0.26.0 was not published to PyPI. To include those fixtures locally, set
+`HAWDB_PREVIOUS_PYTHON` to an interpreter containing exactly `hawdb==0.25.0` and
+`HAWDB_026_PYTHON` to one containing exactly `hawdb==0.26.0`. Upgrade tests for
+an interpreter are skipped when its environment variable is not configured.
 
 These are the project's targeted compatibility tests. SQLAlchemy's full
 `sqlalchemy.testing.suite` additionally requires HawDB-specific capability
@@ -192,7 +210,7 @@ compliance gate.
 
 `.github/workflows/pypi.yaml` publishes the tested source distribution and wheel
 when a GitHub Release is published. The release tag must match the version in
-`pyproject.toml`, for example `v0.26.0`. A manual workflow dispatch runs the same
+`pyproject.toml`, for example `v0.27.0`. A manual workflow dispatch runs the same
 build and tests without uploading to PyPI.
 
 Configure a PyPI Trusted Publisher for the `sqlalchemy-hawdb` project with:
