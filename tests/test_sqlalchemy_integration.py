@@ -28,7 +28,7 @@ def test_engine_initializes_version_and_default_schema(tmp_path):
     engine = make_engine(tmp_path / "initialization.hawdb")
     try:
         with engine.connect() as connection:
-            assert engine.dialect.server_version_info[:2] == (0, 27)
+            assert engine.dialect.server_version_info[:2] == (0, 28)
             assert inspect(connection).default_schema_name == "public"
     finally:
         engine.dispose()

@@ -11,7 +11,11 @@ from sqlalchemy.engine import URL
 @pytest.mark.parametrize("close_mode", ["close", "process_exit"])
 @pytest.mark.parametrize(
     ("previous_version", "interpreter_env"),
-    [("0.25.0", "HAWDB_PREVIOUS_PYTHON"), ("0.26.0", "HAWDB_026_PYTHON")],
+    [
+        ("0.25.0", "HAWDB_PREVIOUS_PYTHON"),
+        ("0.26.0", "HAWDB_026_PYTHON"),
+        ("0.27.0", "HAWDB_027_PYTHON"),
+    ],
 )
 def test_previous_database_reopens_and_accepts_writes_in_current_release(
     tmp_path, close_mode, previous_version, interpreter_env
