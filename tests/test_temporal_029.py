@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -44,7 +44,7 @@ def test_native_timestamps_precision_reflection_and_reopen(tmp_path, zoned):
             values[0].replace(tzinfo=timezone(timedelta(hours=5, minutes=30))),
             values[1].replace(tzinfo=timezone(timedelta(hours=-8))),
         ]
-    expected = [value.astimezone(timezone.utc) if zoned else value for value in values]
+    expected = [value.astimezone(UTC) if zoned else value for value in values]
     # TIMESTAMP(p) halfway rounding is away from the year-2000 epoch.
     rounded = [
         expected[0].replace(microsecond=123000),
@@ -90,7 +90,7 @@ def test_native_timestamps_precision_reflection_and_reopen(tmp_path, zoned):
             ]
             for row in rows[:2]:
                 assert isinstance(row.at, datetime)
-                assert row.at.tzinfo is (timezone.utc if zoned else None)
+                assert row.at.tzinfo is (UTC if zoned else None)
             statement = select(reflected.c.id).where(
                 reflected.c.at >= bindparam("bound", type_=columns["at"]["type"])
             )
@@ -126,7 +126,7 @@ def test_orm_datetime_parameters_and_clock_default(tmp_path):
             assert event.at == value
             assert event.at.tzinfo is None
             assert isinstance(event.created_at, datetime)
-            assert event.created_at.tzinfo is timezone.utc
+            assert event.created_at.tzinfo is UTC
     finally:
         engine.dispose()
 
@@ -201,8 +201,8 @@ def test_timestamp_timezone_mismatch_requires_cast(tmp_path, zoned):
         Column("id", Integer, primary_key=True, autoincrement=False),
         Column("at", DateTime(timezone=zoned)),
     )
-    value = datetime(2026, 11, 9, tzinfo=timezone.utc if zoned else None)
-    mismatch = value.replace(tzinfo=None if zoned else timezone.utc)
+    value = datetime(2026, 11, 9, tzinfo=UTC if zoned else None)
+    mismatch = value.replace(tzinfo=None if zoned else UTC)
     try:
         metadata.create_all(engine)
         with engine.begin() as connection:
