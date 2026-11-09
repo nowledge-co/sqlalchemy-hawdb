@@ -12,7 +12,7 @@ driver and its supported SQL subset.
 ## Requirements
 
 - Python 3.11 or newer
-- HawDB Python binding 0.28.x (CI tests 0.28.0)
+- HawDB Python binding 0.29.x (CI tests 0.29.0)
 - SQLAlchemy 2.x (CI tests both 2.0.x and 2.1.x)
 
 Install the dialect and its HawDB dependency from PyPI:
@@ -21,11 +21,11 @@ Install the dialect and its HawDB dependency from PyPI:
 python -m pip install sqlalchemy-hawdb
 ```
 
-To build HawDB 0.28.0 from source, build and install its wheel from the upstream
+To build HawDB 0.29.0 from source, build and install its wheel from the upstream
 release tag first:
 
 ```sh
-git clone --branch v0.28.0 https://github.com/nowledge-co/hawdb.git
+git clone --branch v0.29.0 https://github.com/nowledge-co/hawdb.git
 cd hawdb/bindings/python
 python -m pip install maturin==1.15.0
 maturin build --release --out dist
@@ -94,7 +94,7 @@ stable while the database is open. A Windows host can obtain the user's
 OS-provisioned LocalAppData path through the known-folder API. Pass the same
 anchor on read-only reopens. The default remains `None`; the dialect does not
 infer an anchor from directory existence or a permission error. See the
-[upstream host contract](https://github.com/nowledge-co/hawdb/blob/v0.28.0/bindings/python/README.md).
+[upstream host contract](https://github.com/nowledge-co/hawdb/blob/v0.29.0/bindings/python/README.md).
 
 ## Supported behavior
 
@@ -109,6 +109,8 @@ infer an anchor from directory existence or a permission error. See the
   SQLAlchemy string lengths are not enforced by HawDB
 - Native `Numeric`, `NUMERIC`, and `DECIMAL` columns with exact Python
   `decimal.Decimal` binding and precision/scale reflection
+- Native `DateTime` / `TIMESTAMP` columns, Python `datetime.datetime` values,
+  timestamp precision/timezone reflection, and clock column defaults
 - SQLAlchemy Core tables without primary keys, including duplicate rows;
   HawDB's hidden row handles are not SQL columns or generated primary keys,
   and SQLAlchemy ORM mappings still require an application-visible primary key
@@ -125,15 +127,66 @@ HawDB supports precision from 1 through 38 and scale from 0 through precision.
 Omitted precision defaults to 38 and omitted scale to 0, so bare `Numeric()`
 has `NUMERIC(38, 0)` semantics and `Numeric(scale=4)` uses `NUMERIC(38, 4)`.
 Column assignment rounds to the declared scale with ties away from zero and
-rejects precision overflow. Decimal/`DOUBLE PRECISION` arithmetic and comparisons
-require an explicit `CAST`; this bounded numeric contract does not provide PostgreSQL's
-arbitrary-precision numeric semantics.
+rejects precision overflow. Decimal columns and bound Decimal parameters still
+require an explicit `CAST` when mixed with `DOUBLE PRECISION`. Since 0.29,
+numeric literals beside DOUBLE operands are coerced to DOUBLE, for example
+`balance + 12.5`; literals beside Decimal operands stay exact. This bounded
+numeric contract does not provide PostgreSQL's arbitrary-precision semantics.
 
-### HawDB 0.28 compatibility
+### Native timestamps and defaults
 
-HawDB 0.28 retains the Python DB-API, value conversions, and connection contract
-from 0.27. CI checks published PyPI wheels separately from wheels built from the
-release tag.
+`DateTime()` and SQLAlchemy `TIMESTAMP()` now create native `TIMESTAMP WITHOUT
+TIME ZONE` columns. `DateTime(timezone=True)` creates `TIMESTAMP WITH TIME
+ZONE` (HawDB's `TIMESTAMPTZ`). Naive Python datetimes bind to TIMESTAMP; aware
+datetimes bind to TIMESTAMPTZ and return normalized to UTC. Cursors preserve
+microseconds and NULLs without converting timestamp values through text.
+
+Use `sqlalchemy.dialects.postgresql.TIMESTAMP(precision=3, timezone=True)`
+when an explicit precision is needed. Precision is 0 through 6, default 6;
+reflection preserves both precision and timezone. Assignment rounds with
+halfway cases away from 2000-01-01. Python-unrepresentable years retain the
+driver's lossless tagged dict instead of being truncated into a datetime.
+
+Clock defaults use the ordinary SQLAlchemy `server_default` interface:
+
+```python
+from sqlalchemy import Column, DateTime, func
+
+created_at = Column("created_at", DateTime(timezone=True), server_default=func.now())
+local_at = Column("local_at", DateTime(), server_default=func.localtimestamp())
+```
+
+`func.current_timestamp()` and `func.now()` return the transaction's start time
+as an aware UTC value. `func.localtimestamp()` returns its naive UTC wall-clock
+equivalent. The clock stays fixed within a transaction and is evaluated again
+in later transactions. Default values are persisted when the row is written.
+
+HawDB has no session timezone. TIMESTAMP/TIMESTAMPTZ comparisons require an
+explicit CAST when their kinds differ. Native DATE/TIME, interval arithmetic,
+`AT TIME ZONE`, and `EXTRACT` remain unsupported. See the
+[timestamp contract](https://github.com/nowledge-co/hawdb/blob/v0.29.0/docs/specs/POSTGRES_SQL_PGQ_SPEC.md#sql-timestamps).
+
+### Upgrading from 0.28
+
+`DateTime` DDL changes from TEXT to native TIMESTAMP in this dialect. Existing
+TEXT columns keep their type and string results, including ISO timestamp text;
+upgrading the dependency or changing a Python declaration does not convert
+stored columns automatically. Use an explicit application migration when
+conversion is needed.
+
+Timestamp values/types and clock defaults use additive on-disk tags in HawDB
+0.29. New binaries can read the existing older formats covered by the upgrade
+fixtures, but older binaries reject databases that contain the new tags. Using
+these features therefore prevents reopening that database with HawDB 0.28 or
+earlier.
+
+### HawDB 0.29 compatibility
+
+HawDB 0.29 adds native SQL timestamps, transaction clock functions, and numeric
+literal coercion. The dialect reuses PostgreSQL's timestamp compiler and leaves
+clock evaluation, value conversion, rounding, and numeric rules in the engine
+and its DB-API. Existing pooling and transaction ownership remain unchanged.
+CI checks published PyPI wheels separately from release-source wheels.
 
 Queries that fix an equality prefix of a composite primary key and optionally
 bound the next key column can now use a primary-key range seek. The dialect's
@@ -149,12 +202,9 @@ The integration tests cover a 20,000-row batch load, aggregation, mutations,
 reopen, and budget refusal followed by a point read. They do not control
 checkpoint timing; engine-level tests own the deterministic overlay regression.
 
-New variable-length paths, relationship type disjunctions, scalar functions,
-and comprehensions belong to Cypher. Per-query DiskANN beam/candidate settings
-belong to the Rust vector search API. These do not add relational SQL syntax
-or Python connection options. The embedded API renaming in this release is a
-Rust source migration; the dialect does not use the renamed contracts. See the
-[0.28 release notes](https://github.com/nowledge-co/hawdb/releases/tag/v0.28.0).
+The remaining optimizer, storage, Cypher, and search changes are engine-owned;
+they do not require additional dialect connection options. See the
+[0.29 release notes](https://github.com/nowledge-co/hawdb/releases/tag/v0.29.0).
 
 Since 0.26, HawDB uses PEG for its supported SQL grammar and retains bounded,
 schema-neutral templates for repeated parameterized INSERT, UPDATE, and DELETE
@@ -164,9 +214,10 @@ works with typed DOUBLE and Decimal parameters, with the explicit-cast rules
 above. These engine changes do not imply support for the entire PostgreSQL
 grammar.
 
-CI creates persistent databases in isolated HawDB 0.25.0, 0.26.0, and 0.27.0
+CI creates persistent databases in isolated HawDB 0.25.0-0.28.0
 interpreters, then checks reads, indexes, Decimal scale, duplicate keyless rows,
-new writes, and reopen using 0.28. Both normal close and abrupt process exit
+new writes, and reopen using 0.29. Legacy timestamp-looking TEXT remains TEXT.
+Both normal close and abrupt process exit
 after committed writes are covered. This is a focused default-configuration
 upgrade fixture, not a migration facility for older formats.
 
@@ -185,8 +236,9 @@ SQLAlchemy type declaration.
 ### Limitations
 
 HawDB does not report affected row counts, so DBAPI `rowcount` is `-1` for
-statements without a result set. Date and time types compile to `TEXT`; their
-values are encoded and decoded by SQLAlchemy's standard processors.
+statements without a result set. Generic `Date` and `Time` retain TEXT DDL;
+native SQL DATE/TIME and Python date/time parameters are unsupported. Encode
+such application values explicitly when using TEXT columns.
 Auto-generated identity columns, sequences, schema alteration, savepoints, and
 concurrent connections to one database path are not supported by this initial
 dialect.
@@ -201,18 +253,19 @@ python -m pytest
 ```
 
 GitHub Actions builds the source distribution and wheel, checks their metadata,
-builds HawDB v0.28.0 from its upstream release tag, and tests the installed
+builds HawDB v0.29.0 from its upstream release tag, and tests the installed
 dialect wheel on Python 3.11-3.13 with SQLAlchemy 2.0.x and 2.1.x for every push
 and pull request. An additional Python 3.11 / SQLAlchemy 2.1 job runs the same
 tests with HawDB's published PyPI wheel instead of the source-built wheel.
 All jobs run on Linux.
 
-Each test job also installs HawDB 0.25.0 and 0.27.0 from PyPI and HawDB 0.26.0
+Each test job also installs HawDB 0.25.0, 0.27.0, and 0.28.0 from PyPI and HawDB 0.26.0
 from its release tag in separate interpreters for cross-version data fixtures. Version
 0.26.0 was not published to PyPI. To include those fixtures locally, set
 `HAWDB_PREVIOUS_PYTHON` to an interpreter containing exactly `hawdb==0.25.0` and
 `HAWDB_026_PYTHON` to one containing exactly `hawdb==0.26.0`, and
-`HAWDB_027_PYTHON` to one containing exactly `hawdb==0.27.0`. Upgrade tests for
+`HAWDB_027_PYTHON` to one containing exactly `hawdb==0.27.0`, and
+`HAWDB_028_PYTHON` to one containing exactly `hawdb==0.28.0`. Upgrade tests for
 an interpreter are skipped when its environment variable is not configured.
 
 These are the project's targeted compatibility tests. SQLAlchemy's full
@@ -224,7 +277,7 @@ compliance gate.
 
 `.github/workflows/pypi.yaml` publishes the tested source distribution and wheel
 when a GitHub Release is published. The release tag must match the version in
-`pyproject.toml`, for example `v0.28.0`. A manual workflow dispatch runs the same
+`pyproject.toml`, for example `v0.29.0`. A manual workflow dispatch runs the same
 build and tests without uploading to PyPI.
 
 Configure a PyPI Trusted Publisher for the `sqlalchemy-hawdb` project with:
