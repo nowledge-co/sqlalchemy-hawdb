@@ -2,6 +2,7 @@ import pytest
 from sqlalchemy import (
     DECIMAL,
     NUMERIC,
+    TIMESTAMP,
     BigInteger,
     Boolean,
     Column,
@@ -23,6 +24,7 @@ from sqlalchemy import (
     select,
     table,
 )
+from sqlalchemy.dialects.postgresql import TIMESTAMP as PG_TIMESTAMP
 from sqlalchemy.engine import make_url
 from sqlalchemy.pool import NullPool, SingletonThreadPool
 from sqlalchemy.schema import CreateTable
@@ -90,12 +92,26 @@ def test_numeric_ddl_preserves_precision_and_scale(type_, expected):
         UnicodeText(80),
         Date(),
         Time(),
-        DateTime(),
         Enum("short", "longer"),
     ],
 )
 def test_text_backed_types_compile_without_postgresql_type_modifiers(type_):
     assert type_.compile(dialect=HawDBDialect()) == "TEXT"
+
+
+@pytest.mark.parametrize(
+    ("type_", "expected"),
+    [
+        (DateTime(), "TIMESTAMP WITHOUT TIME ZONE"),
+        (DateTime(timezone=True), "TIMESTAMP WITH TIME ZONE"),
+        (TIMESTAMP(timezone=True), "TIMESTAMP WITH TIME ZONE"),
+        (PG_TIMESTAMP(precision=0), "TIMESTAMP(0) WITHOUT TIME ZONE"),
+        (PG_TIMESTAMP(precision=6), "TIMESTAMP(6) WITHOUT TIME ZONE"),
+        (PG_TIMESTAMP(timezone=True, precision=3), "TIMESTAMP(3) WITH TIME ZONE"),
+    ],
+)
+def test_timestamp_ddl_reuses_postgresql_precision_and_timezone(type_, expected):
+    assert type_.compile(dialect=HawDBDialect()) == expected
 
 
 @pytest.mark.parametrize(

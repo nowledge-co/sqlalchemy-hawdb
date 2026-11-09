@@ -4,7 +4,16 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
-from sqlalchemy import Column, Integer, MetaData, Numeric, Table, create_engine, inspect
+from sqlalchemy import (
+    Column,
+    Integer,
+    MetaData,
+    Numeric,
+    Table,
+    Text,
+    create_engine,
+    inspect,
+)
 from sqlalchemy.engine import URL
 
 
@@ -15,6 +24,7 @@ from sqlalchemy.engine import URL
         ("0.25.0", "HAWDB_PREVIOUS_PYTHON"),
         ("0.26.0", "HAWDB_026_PYTHON"),
         ("0.27.0", "HAWDB_027_PYTHON"),
+        ("0.28.0", "HAWDB_028_PYTHON"),
     ],
 )
 def test_previous_database_reopens_and_accepts_writes_in_current_release(
@@ -41,10 +51,16 @@ def test_previous_database_reopens_and_accepts_writes_in_current_release(
     try:
         with engine.connect() as connection:
             assert connection.exec_driver_sql(
-                "SELECT id, amount, label, payload FROM accounts ORDER BY id"
+                "SELECT id, amount, label, payload, legacy_at FROM accounts ORDER BY id"
             ).all() == [
-                (1, Decimal("9007199254740993.0100"), "first", b"\x00\xff"),
-                (2, Decimal("0.2500"), "second", b"second"),
+                (
+                    1,
+                    Decimal("9007199254740993.0100"),
+                    "first",
+                    b"\x00\xff",
+                    "2026-11-05T12:00:00.123456",
+                ),
+                (2, Decimal("0.2500"), "second", b"second", None),
             ]
             assert connection.exec_driver_sql("SELECT message FROM events").all() == [
                 ("same",),
@@ -60,6 +76,7 @@ def test_previous_database_reopens_and_accepts_writes_in_current_release(
         amount_type = columns[1]["type"]
         assert isinstance(amount_type, Numeric)
         assert (amount_type.precision, amount_type.scale) == (38, 4)
+        assert isinstance(columns[4]["type"], Text)
         assert inspector.get_pk_constraint("accounts")["constrained_columns"] == ["id"]
         assert any(
             index["column_names"] == ["amount"]

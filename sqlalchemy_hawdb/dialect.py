@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 
 from sqlalchemy import types
+from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.dialects.postgresql.base import PGIdentifierPreparer, PGTypeCompiler
 from sqlalchemy.engine import default
 from sqlalchemy.pool import NullPool, SingletonThreadPool
@@ -39,7 +40,6 @@ class HawDBTypeCompiler(PGTypeCompiler):
     visit_unicode_text = visit_string
     visit_date = visit_string
     visit_time = visit_string
-    visit_datetime = visit_string
     visit_enum = visit_string
 
     def visit_NUMERIC(self, type_, **kw):
@@ -78,7 +78,7 @@ class HawDBDialect(default.DefaultDialect):
         except ImportError as error:
             raise ImportError(
                 "HawDB's Python binding is required; install it with "
-                "python -m pip install 'hawdb>=0.28.0,<0.29.0'"
+                "python -m pip install 'hawdb>=0.29.0,<0.30.0'"
             ) from error
 
     def create_connect_args(self, url):
@@ -164,7 +164,7 @@ class HawDBDialect(default.DefaultDialect):
             return []
         result = connection.exec_driver_sql(
             "SELECT column_name, data_type, is_nullable, column_default, "
-            "numeric_precision, numeric_scale "
+            "numeric_precision, numeric_scale, datetime_precision "
             "FROM information_schema.columns "
             "WHERE table_schema = 'public' AND table_name = $1 "
             "ORDER BY ordinal_position",
@@ -173,7 +173,7 @@ class HawDBDialect(default.DefaultDialect):
         return [
             {
                 "name": row[0],
-                "type": self._type_from_name(row[1], row[4], row[5]),
+                "type": self._type_from_name(row[1], row[4], row[5], row[6]),
                 "nullable": row[2] == "YES",
                 "default": row[3],
                 "autoincrement": False,
@@ -293,7 +293,10 @@ class HawDBDialect(default.DefaultDialect):
 
     @staticmethod
     def _type_from_name(
-        name: str, precision: int | None = None, scale: int | None = None
+        name: str,
+        precision: int | None = None,
+        scale: int | None = None,
+        datetime_precision: int | None = None,
     ):
         normalized = name.lower()
         if normalized in {"smallint", "integer", "bigint"}:
@@ -304,13 +307,11 @@ class HawDBDialect(default.DefaultDialect):
             return types.Float()
         if normalized in {"boolean", "bool"}:
             return types.Boolean()
-        if normalized in {
-            "date",
-            "time",
-            "timestamp",
-            "timestamp without time zone",
-            "timestamp with time zone",
-        }:
+        if normalized in {"timestamp", "timestamp without time zone"}:
+            return TIMESTAMP(timezone=False, precision=datetime_precision)
+        if normalized in {"timestamptz", "timestamp with time zone"}:
+            return TIMESTAMP(timezone=True, precision=datetime_precision)
+        if normalized in {"date", "time"}:
             return types.Text()
         if normalized in {"uuid"}:
             return types.Uuid()
