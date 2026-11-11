@@ -1,4 +1,4 @@
-"""Create release-specific databases in an isolated previous-version process."""
+"""Create checkpointed databases in an isolated release-specific process."""
 
 import os
 import sys
@@ -31,11 +31,12 @@ def main():
             row,
         )
     database.execute_sql("CREATE TABLE events (message TEXT)")
-    for _ in range(2):
-        database.execute_sql("INSERT INTO events (message) VALUES ($1)", ["same"])
-
+    database.execute_sql("INSERT INTO events (message) VALUES ($1)", ["same"])
+    # A WAL-only fixture does not establish row-page format compatibility.
+    database.execute("CHECKPOINT")
+    database.execute_sql("INSERT INTO events (message) VALUES ($1)", ["same"])
     if sys.argv[2] == "process_exit":
-        # Preserve committed WAL without native handle cleanup.
+        # Preserve the checkpoint and committed WAL tail without handle cleanup.
         os._exit(0)
     database.close()
 
