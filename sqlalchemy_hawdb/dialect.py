@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import importlib
+from typing import ClassVar
 
-from sqlalchemy import types
+from sqlalchemy import exc, schema, types
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.dialects.postgresql.base import PGIdentifierPreparer, PGTypeCompiler
 from sqlalchemy.engine import default
 from sqlalchemy.pool import NullPool, SingletonThreadPool
-from sqlalchemy.sql.compiler import IdentifierPreparer
+from sqlalchemy.sql.compiler import DDLCompiler, IdentifierPreparer
 
 
 class HawDBIdentifierPreparer(PGIdentifierPreparer):
@@ -51,6 +52,45 @@ class HawDBTypeCompiler(PGTypeCompiler):
     visit_DECIMAL = visit_NUMERIC
 
 
+class HawDBDDLCompiler(DDLCompiler):
+    def _is_search_index(self, index):
+        options = index.dialect_options["hawdb"]
+        using = options["using"]
+        analyzer = options["analyzer"]
+        if using in (None, "btree"):
+            if analyzer is not None:
+                raise exc.CompileError("hawdb_analyzer requires hawdb_using='bm25'")
+            return False
+        if using != "bm25":
+            raise exc.CompileError("hawdb_using must be 'btree' or 'bm25'")
+        if analyzer not in (None, "cjk_ngram"):
+            raise exc.CompileError("HawDB supports only the cjk_ngram search analyzer")
+        if (
+            index.unique
+            or len(index.expressions) != 1
+            or not isinstance(index.expressions[0], schema.Column)
+            or not isinstance(index.expressions[0].type, types.String)
+        ):
+            raise exc.CompileError(
+                "A BM25 index requires one TEXT column and cannot be unique"
+            )
+        return True
+
+    def visit_create_index(self, create, **kw):
+        search = self._is_search_index(create.element)
+        sql = super().visit_create_index(create, **kw)
+        if search:
+            sql = sql.replace("CREATE INDEX", "CREATE SEARCH INDEX", 1)
+            if create.element.dialect_options["hawdb"]["analyzer"] is not None:
+                sql += " WITH (analyzer = 'cjk_ngram')"
+        return sql
+
+    def visit_drop_index(self, drop, **kw):
+        search = self._is_search_index(drop.element)
+        sql = super().visit_drop_index(drop, **kw)
+        return sql.replace("DROP INDEX", "DROP SEARCH INDEX", 1) if search else sql
+
+
 class HawDBDialect(default.DefaultDialect):
     name = "hawdb"
     driver = "embedded"
@@ -58,7 +98,7 @@ class HawDBDialect(default.DefaultDialect):
     supports_native_boolean = True
     supports_native_decimal = True
     supports_native_uuid = True
-    supports_sane_rowcount = False
+    supports_sane_rowcount = True
     supports_sane_multi_rowcount = False
     supports_sequences = False
     supports_identity_columns = False
@@ -70,6 +110,10 @@ class HawDBDialect(default.DefaultDialect):
     default_paramstyle = "numeric_dollar"
     preparer = HawDBIdentifierPreparer
     type_compiler_cls = HawDBTypeCompiler
+    ddl_compiler = HawDBDDLCompiler
+    construct_arguments: ClassVar[list] = [
+        (schema.Index, {"using": None, "analyzer": None})
+    ]
 
     @classmethod
     def import_dbapi(cls):
@@ -78,7 +122,7 @@ class HawDBDialect(default.DefaultDialect):
         except ImportError as error:
             raise ImportError(
                 "HawDB's Python binding is required; install it with "
-                "python -m pip install 'hawdb>=0.30.0,<0.31.0'"
+                "python -m pip install 'hawdb>=0.31.0,<0.32.0'"
             ) from error
 
     def create_connect_args(self, url):
@@ -213,7 +257,11 @@ class HawDBDialect(default.DefaultDialect):
                 "name": row[0],
                 "column_names": self._index_columns(row[1]),
                 "unique": row[1].upper().startswith("CREATE UNIQUE INDEX"),
-                "dialect_options": {},
+                "dialect_options": (
+                    {"hawdb_using": "bm25", "hawdb_analyzer": "cjk_ngram"}
+                    if row[1].upper().startswith("CREATE SEARCH INDEX")
+                    else {}
+                ),
             }
             for row in result
             if row[0] != primary_key_name
@@ -241,7 +289,7 @@ class HawDBDialect(default.DefaultDialect):
 
     @staticmethod
     def _index_columns(definition: str) -> list[str]:
-        """Parse the simple parenthesized column list emitted by pg_indexes."""
+        """Parse the column list before optional search-index WITH options."""
         opening = closing = -1
         quoted = False
         depth = 0
@@ -265,6 +313,7 @@ class HawDBDialect(default.DefaultDialect):
                 depth -= 1
                 if depth == 0:
                     closing = index
+                    break
             index += 1
         if opening < 0 or closing <= opening:
             return []

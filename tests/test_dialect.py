@@ -10,6 +10,8 @@ from sqlalchemy import (
     DateTime,
     Enum,
     Float,
+    Index,
+    Integer,
     LargeBinary,
     MetaData,
     Numeric,
@@ -21,13 +23,15 @@ from sqlalchemy import (
     UnicodeText,
     Uuid,
     column,
+    func,
     select,
     table,
 )
 from sqlalchemy.dialects.postgresql import TIMESTAMP as PG_TIMESTAMP
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import CompileError
 from sqlalchemy.pool import NullPool, SingletonThreadPool
-from sqlalchemy.schema import CreateTable
+from sqlalchemy.schema import CreateIndex, CreateTable, DropIndex
 
 from sqlalchemy_hawdb.dialect import HawDBDialect
 
@@ -162,3 +166,76 @@ def test_primary_key_index_parser_handles_quoted_commas_and_escaped_quotes():
     definition = 'CREATE INDEX x ON public.t USING btree ("a,b", "a""b", "p(q)")'
 
     assert HawDBDialect._index_columns(definition) == ["a,b", 'a"b', "p(q)"]
+
+
+def test_search_index_compilation_preserves_quoting_and_conditional_ddl():
+    documents = Table("Documents", MetaData(), Column("Body", Text))
+    index = Index(
+        "Search Index", documents.c.Body, hawdb_using="bm25", hawdb_analyzer="cjk_ngram"
+    )
+    dialect = HawDBDialect()
+    assert str(CreateIndex(index, if_not_exists=True).compile(dialect=dialect)) == (
+        'CREATE SEARCH INDEX IF NOT EXISTS "Search Index" ON "Documents" ("Body")'
+        " WITH (analyzer = 'cjk_ngram')"
+    )
+    assert str(DropIndex(index, if_exists=True).compile(dialect=dialect)).strip() == (
+        'DROP SEARCH INDEX IF EXISTS "Search Index"'
+    )
+
+
+@pytest.mark.parametrize("using", [None, "btree"])
+def test_regular_index_compilation_is_preserved(using):
+    documents = Table("documents", MetaData(), Column("body", Text))
+    index = Index("body_idx", documents.c.body, hawdb_using=using)
+    dialect = HawDBDialect()
+    assert str(CreateIndex(index).compile(dialect=dialect)) == (
+        "CREATE INDEX body_idx ON documents (body)"
+    )
+    assert (
+        str(DropIndex(index).compile(dialect=dialect)).strip() == "DROP INDEX body_idx"
+    )
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "unique",
+        "multiple",
+        "integer",
+        "expression",
+        "analyzer",
+        "using",
+        "orphan_analyzer",
+    ],
+)
+def test_search_index_refuses_unsupported_options(case):
+    documents = Table(
+        "documents", MetaData(), Column("id", Integer), Column("body", Text)
+    )
+    options = {"hawdb_using": "bm25"}
+    expressions = [documents.c.body]
+    if case == "unique":
+        options["unique"] = True
+    elif case == "multiple":
+        expressions.append(documents.c.id)
+    elif case == "integer":
+        expressions = [documents.c.id]
+    elif case == "expression":
+        expressions = [func.lower(documents.c.body)]
+    elif case == "analyzer":
+        options["hawdb_analyzer"] = "jieba"
+    elif case == "using":
+        options["hawdb_using"] = "gin"
+    else:
+        options = {"hawdb_analyzer": "cjk_ngram"}
+    index = Index("invalid_index", *expressions, **options)
+    with pytest.raises(CompileError):
+        CreateIndex(index).compile(dialect=HawDBDialect())
+
+
+def test_search_index_column_parser_ignores_analyzer_options():
+    definition = (
+        'CREATE SEARCH INDEX "search(x)" ON public."docs(y)" ("a,b") '
+        "WITH (analyzer = 'cjk_ngram')"
+    )
+    assert HawDBDialect._index_columns(definition) == ["a,b"]
