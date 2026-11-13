@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        hawdb-version: ["0.26.0", "0.30.0"]
+        hawdb-version: ["0.26.0", "0.31.0"]
     steps:
       - name: Check out HawDB v${{ matrix.hawdb-version }}
         uses: actions/checkout@v4
@@ -118,7 +118,7 @@ jobs:
           if-no-files-found: error
 
   test:
-    name: HawDB v0.30.0 / Python ${{ matrix.python-version }} / SQLAlchemy ${{ matrix.sqlalchemy-version }} / ${{ matrix.hawdb-artifact }}
+    name: HawDB v0.31.0 / Python ${{ matrix.python-version }} / SQLAlchemy ${{ matrix.sqlalchemy-version }} / ${{ matrix.hawdb-artifact }}
     needs: [build, build-hawdb]
     runs-on: ubuntu-latest
     strategy:
@@ -152,7 +152,7 @@ jobs:
         if: matrix.hawdb-artifact == 'source'
         uses: actions/download-artifact@v4
         with:
-          name: hawdb-v0.30.0-python-wheel
+          name: hawdb-v0.31.0-python-wheel
           path: hawdb-dist
 
       - name: Download HawDB 0.26 wheel for upgrade fixtures
@@ -166,7 +166,7 @@ jobs:
           HAWDB_ARTIFACT: ${{ matrix.hawdb-artifact }}
         run: |
           wheels=(dist/*.whl)
-          hawdb_requirement='hawdb==0.30.0'
+          hawdb_requirement='hawdb==0.31.0'
           if [[ "$HAWDB_ARTIFACT" == 'source' ]]; then
             hawdb_wheels=(hawdb-dist/*.whl)
             hawdb_requirement="${hawdb_wheels[0]}"
@@ -186,6 +186,8 @@ jobs:
           "$RUNNER_TEMP/hawdb-0.28/bin/python" -m pip install --only-binary=hawdb 'hawdb==0.28.0'
           python -m venv "$RUNNER_TEMP/hawdb-0.29"
           "$RUNNER_TEMP/hawdb-0.29/bin/python" -m pip install --only-binary=hawdb 'hawdb==0.29.0'
+          python -m venv "$RUNNER_TEMP/hawdb-0.30"
+          "$RUNNER_TEMP/hawdb-0.30/bin/python" -m pip install --only-binary=hawdb 'hawdb==0.30.0'
 
       - name: Verify HawDB binding package
         working-directory: ${{ runner.temp }}
@@ -196,7 +198,7 @@ jobs:
           import hawdb
           from sqlalchemy_hawdb import HawDBDialect
 
-          assert version("hawdb") == "0.30.0"
+          assert version("hawdb") == "0.31.0"
           assert version("SQLAlchemy").startswith("${{ matrix.sqlalchemy-version }}.")
           assert callable(hawdb.open)
           assert callable(HawDBDialect.import_dbapi().connect)
@@ -211,4 +213,5 @@ jobs:
           HAWDB_027_PYTHON: ${{ runner.temp }}/hawdb-0.27/bin/python
           HAWDB_028_PYTHON: ${{ runner.temp }}/hawdb-0.28/bin/python
           HAWDB_029_PYTHON: ${{ runner.temp }}/hawdb-0.29/bin/python
+          HAWDB_030_PYTHON: ${{ runner.temp }}/hawdb-0.30/bin/python
         run: python -m pytest "$GITHUB_WORKSPACE/tests"

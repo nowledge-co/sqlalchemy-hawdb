@@ -99,9 +99,19 @@ def test_previous_v1_checkpoint_is_refused_without_rewriting_storage(
 
 
 @pytest.mark.parametrize("close_mode", ["close", "process_exit"])
-def test_current_v2_checkpoint_reopens_and_accepts_writes(tmp_path, close_mode):
+@pytest.mark.parametrize(
+    ("version", "interpreter_env"), [("0.30.0", "HAWDB_030_PYTHON"), ("0.31.0", None)]
+)
+def test_v2_checkpoint_reopens_and_accepts_writes(
+    tmp_path, close_mode, version, interpreter_env
+):
+    python = (
+        sys.executable if interpreter_env is None else os.environ.get(interpreter_env)
+    )
+    if python is None:
+        pytest.skip(f"Set {interpreter_env} to an isolated HawDB {version} interpreter")
     path = tmp_path / "current.hawdb"
-    create_database(sys.executable, path, close_mode, "0.30.0")
+    create_database(python, path, close_mode, version)
     assert_row_page_format(path, b"SKRPGM02")
     engine = create_engine(URL.create("hawdb", database=str(path)))
     try:

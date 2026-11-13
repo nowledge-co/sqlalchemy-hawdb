@@ -12,7 +12,7 @@ driver and its supported SQL subset.
 ## Requirements
 
 - Python 3.11 or newer
-- HawDB Python binding 0.30.x (CI tests 0.30.0)
+- HawDB Python binding 0.31.x (CI tests 0.31.0)
 - SQLAlchemy 2.x (CI tests both 2.0.x and 2.1.x)
 
 Install the dialect and its HawDB dependency from PyPI:
@@ -24,11 +24,11 @@ python -m pip install sqlalchemy-hawdb
 HawDB 0.30 introduces row-page format v2. Existing databases containing v1
 relational checkpoints cannot be opened directly; see [Upgrading to 0.30](#upgrading-to-030).
 
-To build HawDB 0.30.0 from source, build and install its wheel from the upstream
+To build HawDB 0.31.0 from source, build and install its wheel from the upstream
 release tag first:
 
 ```sh
-git clone --branch v0.30.0 https://github.com/nowledge-co/hawdb.git
+git clone --branch v0.31.0 https://github.com/nowledge-co/hawdb.git
 cd hawdb/bindings/python
 python -m pip install maturin==1.15.0
 maturin build --release --out dist
@@ -97,7 +97,7 @@ stable while the database is open. A Windows host can obtain the user's
 OS-provisioned LocalAppData path through the known-folder API. Pass the same
 anchor on read-only reopens. The default remains `None`; the dialect does not
 infer an anchor from directory existence or a permission error. See the
-[upstream host contract](https://github.com/nowledge-co/hawdb/blob/v0.30.0/bindings/python/README.md).
+[upstream host contract](https://github.com/nowledge-co/hawdb/blob/v0.31.0/bindings/python/README.md).
 
 ## Supported behavior
 
@@ -114,9 +114,77 @@ infer an anchor from directory existence or a permission error. See the
   `decimal.Decimal` binding and precision/scale reflection
 - Native `DateTime` / `TIMESTAMP` columns, Python `datetime.datetime` values,
   timestamp precision/timezone reflection, and clock column defaults
+- Single-statement DML row counts, ORM version checks, and typed relational
+  `IntegrityError` / `DataError` exceptions through HawDB's DB-API
+- BM25 search-index DDL and reflection through `Index(..., hawdb_using="bm25")`
 - SQLAlchemy Core tables without primary keys, including duplicate rows;
   HawDB's hidden row handles are not SQL columns or generated primary keys,
   and SQLAlchemy ORM mappings still require an application-visible primary key
+
+### Affected rows and errors
+
+HawDB 0.31 reports matched rows for ordinary RowPage-table INSERT, UPDATE, and
+DELETE statements, including zero matches. The dialect enables SQLAlchemy's
+single-statement row-count checks, including ORM optimistic version checks.
+Inside a transaction a count describes staged work; rollback still discards
+it. `executemany`, DDL, and strict append-table writes still report `-1`, so
+`supports_sane_multi_rowcount` remains false. Strict append tables are not a
+supported target for ORM version checks. DML RETURNING support is not enabled
+by this change.
+
+Relational constraint violations (such as a duplicate primary key or NOT NULL
+violation) become SQLAlchemy `IntegrityError`; wrong-type/schema refusals
+become `DataError`. The driver retains `kind="constraint"` / `"schema"` and
+`retryable=False` on the original error, accessible as `error.orig`. Storage
+corruption and unsupported formats retain their separate driver categories;
+the dialect does not classify errors by matching message text. A failed single
+statement leaves the transaction usable; a failed `executemany` aborts its
+whole transaction and requires rollback, as before.
+
+### SQL BM25 search indexes
+
+Use the normal SQLAlchemy index lifecycle for an engine-maintained index on
+one TEXT column:
+
+```python
+from sqlalchemy import Column, Index, Integer, MetaData, Table, Text, text
+
+documents = Table(
+    "documents", MetaData(),
+    Column("id", Integer, primary_key=True, autoincrement=False),
+    Column("body", Text),
+)
+search_index = Index(
+    "documents_text", documents.c.body,
+    hawdb_using="bm25", hawdb_analyzer="cjk_ngram",
+)
+documents.metadata.create_all(engine)
+
+query = text(
+    "SELECT d.id, score FROM text_search(:index, :query, top_k => :top_k) AS d "
+    "ORDER BY score DESC, d.id"
+)
+with engine.connect() as connection:
+    rows = connection.execute(
+        query, {"index": "documents_text", "query": "database", "top_k": 20}
+    ).all()
+
+search_index.drop(engine)
+```
+
+`hawdb_analyzer` is optional; `cjk_ngram` is the only supported analyzer.
+`hawdb_using="btree"` or no method keeps ordinary index DDL. Search indexes
+cannot be unique, contain expressions, or index multiple columns. Reflection
+through `Inspector.get_indexes()` preserves the source column and the
+`hawdb_using` / `hawdb_analyzer` options, so recreating or dropping a reflected
+index uses SEARCH INDEX DDL. Search indexes are omitted from table/view lists.
+
+`text_search` accepts bound arguments and requires `top_k` from 1 to 10,000.
+It returns source rows with a virtual DOUBLE PRECISION `score`. Filters apply
+before the top-k cut, and the index sees staged writes in the transaction.
+Postings and source rows commit or roll back together. Joins, aggregates,
+DISTINCT, and locking clauses are unsupported for this table function. See the
+[upstream SQL search contract](https://github.com/nowledge-co/hawdb/blob/v0.31.0/docs/SQL_SEARCH_INDEXES.md).
 
 ### Exact numeric values
 
@@ -167,7 +235,22 @@ in later transactions. Default values are persisted when the row is written.
 HawDB has no session timezone. TIMESTAMP/TIMESTAMPTZ comparisons require an
 explicit CAST when their kinds differ. Native DATE/TIME, interval arithmetic,
 `AT TIME ZONE`, and `EXTRACT` remain unsupported. See the
-[timestamp contract](https://github.com/nowledge-co/hawdb/blob/v0.30.0/docs/specs/POSTGRES_SQL_PGQ_SPEC.md#sql-timestamps).
+[timestamp contract](https://github.com/nowledge-co/hawdb/blob/v0.31.0/docs/specs/POSTGRES_SQL_PGQ_SPEC.md#sql-timestamps).
+
+### Upgrading to 0.31
+
+The release introduces engine-wide persistent format version 2. HawDB 0.30
+predates that version, so the release notes report the format comparison as
+unknown. Row-page v2 magic alone does not establish compatibility of every
+database codec. CI includes a focused 0.30 checkpoint-plus-WAL-tail fixture;
+that is not a promise for every old graph/schema/search configuration.
+
+The new logical dump, verification, and format-version APIs are available in
+Rust and the C ABI; HawDB 0.31's Python binding does not expose them. The
+dialect adds no automatic migration. Preserve the original database and use a
+reader that supports its exact format before exporting or rebuilding. A new
+reader cannot export a format it refuses. See the
+[logical dump contract](https://github.com/nowledge-co/hawdb/blob/v0.31.0/docs/LOGICAL_DUMP.md).
 
 ### Upgrading to 0.30
 
@@ -202,20 +285,24 @@ Timestamp values/types and clock defaults introduced additive on-disk tags in
 HawDB 0.29. Older binaries reject databases that contain these tags. This
 timestamp boundary does not relax 0.30's independent row-page v2 requirement.
 
-### HawDB 0.30 compatibility
+### HawDB 0.31 compatibility
 
-The Python DB-API, relational SQL grammar, and type/reflection interfaces are
-unchanged from 0.29. The dialect continues to reuse PostgreSQL's type compiler
-and identifier preparer, leaving clock evaluation, value conversion, rounding,
-and numeric rules in HawDB. Existing pooling and transaction ownership remain
-unchanged. CI checks published PyPI wheels separately from release-source wheels.
+The dialect continues to reuse PostgreSQL's type compiler and identifier
+preparer. Native timestamp/Decimal conversion and error classification stay
+in HawDB's DB-API, and the engine owns BM25 scoring and index maintenance.
+Existing pooling and transaction ownership remain unchanged. CI checks
+published PyPI wheels separately from release-source wheels.
 
-The new `JSON_VALUE(... NULL ON NONSCALAR)` clause belongs to Cypher and does
-not add SQL/JSON support to this dialect. LlamaIndex's graph store and the Bun
-FFI adapter are separate integrations. Graph optimizer, search, and storage
-improvements require no additional SQLAlchemy connection flags. The v2 page
-layout is owned by the engine. See the
-[0.30 release notes](https://github.com/nowledge-co/hawdb/releases/tag/v0.30.0).
+The new `max_read_intermediate_rows` setting separates relational scan work
+from result rows in Rust and the C ABI, but the 0.31 Python binding does not
+accept it. Do not pass it through `connect_args`. The existing
+`max_read_result_rows` still controls the inherited scan ceiling in Python;
+`LIMIT` does not authorize more scan work. No new dialect URL option is added.
+
+Cypher string/label functions, graph property defaults, FFI transactions and
+backup/restore, and search projection APIs are outside the SQLAlchemy SQL
+surface. See the
+[0.31 release notes](https://github.com/nowledge-co/hawdb/releases/tag/v0.31.0).
 
 Queries that fix an equality prefix of a composite primary key and optionally
 bound the next key column can use a primary-key range seek since 0.28. The
@@ -242,7 +329,7 @@ grammar.
 CI creates real v1 checkpoints in isolated HawDB 0.25.0-0.29.0 interpreters,
 then verifies that read-only and writable opens refuse them with the typed
 unsupported-format error and leave their storage files unchanged. Separate
-0.30 v2 fixtures check reads, indexes, Decimal scale, duplicate keyless rows,
+0.30 and 0.31 v2 fixtures check reads, indexes, Decimal scale, duplicate keyless rows,
 legacy timestamp-looking TEXT, new writes, and reopen. Both normal close and
 process exit after an explicit checkpoint plus committed WAL tail are covered.
 A variable-width checkpoint test covers narrow rows, rows larger than the 32 KiB writer target,
@@ -262,8 +349,7 @@ SQLAlchemy type declaration.
 
 ### Limitations
 
-HawDB does not report affected row counts, so DBAPI `rowcount` is `-1` for
-statements without a result set. Generic `Date` and `Time` retain TEXT DDL;
+Generic `Date` and `Time` retain TEXT DDL;
 native SQL DATE/TIME and Python date/time parameters are unsupported. Encode
 such application values explicitly when using TEXT columns.
 Auto-generated identity columns, sequences, schema alteration, savepoints, and
@@ -280,20 +366,21 @@ python -m pytest
 ```
 
 GitHub Actions builds the source distribution and wheel, checks their metadata,
-builds HawDB v0.30.0 from its upstream release tag, and tests the installed
+builds HawDB v0.31.0 from its upstream release tag, and tests the installed
 dialect wheel on Python 3.11-3.13 with SQLAlchemy 2.0.x and 2.1.x for every push
 and pull request. An additional Python 3.11 / SQLAlchemy 2.1 job runs the same
 tests with HawDB's published PyPI wheel instead of the source-built wheel.
 All jobs run on Linux.
 
-Each test job also installs HawDB 0.25.0, 0.27.0, 0.28.0, and 0.29.0 from PyPI
+Each test job also installs HawDB 0.25.0, 0.27.0, 0.28.0, 0.29.0, and 0.30.0 from PyPI
 and HawDB 0.26.0 from its release tag in separate interpreters for v1 refusal
 fixtures. Version 0.26.0 was not published to PyPI. To include those fixtures locally, set
 `HAWDB_PREVIOUS_PYTHON` to an interpreter containing exactly `hawdb==0.25.0` and
 `HAWDB_026_PYTHON` to one containing exactly `hawdb==0.26.0`, and
 `HAWDB_027_PYTHON` to one containing exactly `hawdb==0.27.0`, and
 `HAWDB_028_PYTHON` to one containing exactly `hawdb==0.28.0`, and
-`HAWDB_029_PYTHON` to one containing exactly `hawdb==0.29.0`. Refusal tests for
+`HAWDB_029_PYTHON` to one containing exactly `hawdb==0.29.0`, and
+`HAWDB_030_PYTHON` to one containing exactly `hawdb==0.30.0`. Cross-version tests for
 an interpreter are skipped when its environment variable is not configured.
 
 These are the project's targeted compatibility tests. SQLAlchemy's full
@@ -305,7 +392,7 @@ compliance gate.
 
 `.github/workflows/pypi.yaml` publishes the tested source distribution and wheel
 when a GitHub Release is published. The release tag must match the version in
-`pyproject.toml`, for example `v0.30.0`. A manual workflow dispatch runs the same
+`pyproject.toml`, for example `v0.31.0`. A manual workflow dispatch runs the same
 build and tests without uploading to PyPI.
 
 Configure a PyPI Trusted Publisher for the `sqlalchemy-hawdb` project with:
