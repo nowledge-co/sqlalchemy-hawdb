@@ -126,6 +126,9 @@ infer an anchor from directory existence or a permission error. See the
 HawDB 0.31 reports matched rows for ordinary RowPage-table INSERT, UPDATE, and
 DELETE statements, including zero matches. The dialect enables SQLAlchemy's
 single-statement row-count checks, including ORM optimistic version checks.
+SQLAlchemy preserves UPDATE/DELETE counts by default; use
+`statement.execution_options(preserve_rowcount=True)` to retain an INSERT
+count after SQLAlchemy closes its cursor.
 Inside a transaction a count describes staged work; rollback still discards
 it. `executemany`, DDL, and strict append-table writes still report `-1`, so
 `supports_sane_multi_rowcount` remains false. Strict append tables are not a
@@ -177,7 +180,8 @@ search_index.drop(engine)
 cannot be unique, contain expressions, or index multiple columns. Reflection
 through `Inspector.get_indexes()` preserves the source column and the
 `hawdb_using` / `hawdb_analyzer` options, so recreating or dropping a reflected
-index uses SEARCH INDEX DDL. Search indexes are omitted from table/view lists.
+index uses SEARCH INDEX DDL. Search indexes are omitted from table/view lists;
+the engine's readable `hawdb_schema_migrations` registry remains a table.
 
 `text_search` accepts bound arguments and requires `top_k` from 1 to 10,000.
 It returns source rows with a virtual DOUBLE PRECISION `score`. Filters apply

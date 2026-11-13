@@ -33,7 +33,10 @@ def test_single_statement_rowcounts_and_executemany_boundary(tmp_path):
     try:
         records.metadata.create_all(engine)
         with engine.begin() as connection:
-            result = connection.execute(records.insert(), {"id": 1, "body": "same"})
+            result = connection.execute(
+                records.insert().execution_options(preserve_rowcount=True),
+                {"id": 1, "body": "same"},
+            )
             assert result.rowcount == 1
             assert result.supports_sane_rowcount()
             result = connection.execute(
@@ -224,7 +227,10 @@ def test_bm25_index_reflection_search_mutation_rollback_and_reopen(tmp_path):
             "hawdb_analyzer": "cjk_ngram",
         }
         assert indexes["documents_stream"]["dialect_options"] == {}
-        assert inspect(engine).get_table_names() == ["documents"]
+        assert inspect(engine).get_table_names() == [
+            "documents",
+            "hawdb_schema_migrations",
+        ]
         assert inspect(engine).get_view_names() == []
         with engine.connect() as connection:
             rows = connection.execute(search, parameters).all()
