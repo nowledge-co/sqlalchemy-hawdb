@@ -2,6 +2,7 @@ import hashlib
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -100,7 +101,12 @@ def test_previous_v1_checkpoint_is_refused_without_rewriting_storage(
 
 @pytest.mark.parametrize("close_mode", ["close", "process_exit"])
 @pytest.mark.parametrize(
-    ("version", "interpreter_env"), [("0.30.0", "HAWDB_030_PYTHON"), ("0.31.0", None)]
+    ("version", "interpreter_env"),
+    [
+        ("0.30.0", "HAWDB_030_PYTHON"),
+        ("0.31.0", "HAWDB_031_PYTHON"),
+        ("0.33.0", None),
+    ],
 )
 def test_v2_checkpoint_reopens_and_accepts_writes(
     tmp_path, close_mode, version, interpreter_env
@@ -136,6 +142,14 @@ def test_v2_checkpoint_reopens_and_accepts_writes(
                 "SELECT id FROM accounts WHERE amount = $1",
                 (Decimal("9007199254740993.0100"),),
             ).all() == [(1,)]
+            if version != "0.30.0":
+                assert connection.exec_driver_sql(
+                    "SELECT id, created_at FROM documents ORDER BY id"
+                ).all() == [(1, datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc))]
+                assert connection.exec_driver_sql(
+                    "SELECT id FROM text_search($1, $2, top_k => $3)",
+                    ("documents_text", "database", 10),
+                ).all() == [(1,)]
 
         inspector = inspect(engine)
         columns = inspector.get_columns("accounts")
@@ -153,6 +167,11 @@ def test_v2_checkpoint_reopens_and_accepts_writes(
             for constraint in inspector.get_unique_constraints("accounts")
         ] == [["label"]]
         assert inspector.get_pk_constraint("events")["constrained_columns"] == []
+        if version != "0.30.0":
+            assert inspector.get_indexes("documents")[0]["dialect_options"] == {
+                "hawdb_using": "bm25",
+                "hawdb_analyzer": "cjk_ngram",
+            }
 
         accounts = Table(
             "accounts",
