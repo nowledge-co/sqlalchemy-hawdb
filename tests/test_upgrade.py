@@ -2,7 +2,7 @@ import hashlib
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -145,7 +145,7 @@ def test_v2_checkpoint_reopens_and_accepts_writes(
             if version != "0.30.0":
                 assert connection.exec_driver_sql(
                     "SELECT id, created_at FROM documents ORDER BY id"
-                ).all() == [(1, datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc))]
+                ).all() == [(1, datetime(2026, 11, 5, 12, 0, tzinfo=UTC))]
                 assert connection.exec_driver_sql(
                     "SELECT id FROM text_search($1, $2, top_k => $3)",
                     ("documents_text", "database", 10),

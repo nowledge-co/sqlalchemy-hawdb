@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import hawdb
@@ -47,7 +47,7 @@ def test_chunked_results_preserve_types_order_and_cursor_lifecycle(
     )
     count = 2054
     amount = Decimal("9007199254740993.0100")
-    created_at = datetime(2026, 11, 15, 12, 0, 0, 123456, tzinfo=timezone.utc)
+    created_at = datetime(2026, 11, 15, 12, 0, 0, 123456, tzinfo=UTC)
     try:
         records.metadata.create_all(engine)
         with engine.begin() as connection:

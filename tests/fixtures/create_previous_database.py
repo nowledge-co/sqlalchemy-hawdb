@@ -2,7 +2,7 @@
 
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from importlib.metadata import version
 
@@ -42,7 +42,7 @@ def main():
         database.execute_sql("CREATE SEARCH INDEX documents_text ON documents (body)")
         database.execute_sql(
             "INSERT INTO documents VALUES ($1, $2, $3)",
-            [1, "initial", datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)],
+            [1, "initial", datetime(2026, 11, 5, 12, 0, tzinfo=UTC)],
         )
     # A WAL-only fixture does not establish row-page format compatibility.
     database.execute("CHECKPOINT")
