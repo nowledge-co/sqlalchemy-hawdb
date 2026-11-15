@@ -2,6 +2,7 @@
 
 import os
 import sys
+from datetime import UTC, datetime
 from decimal import Decimal
 from importlib.metadata import version
 
@@ -32,9 +33,24 @@ def main():
         )
     database.execute_sql("CREATE TABLE events (message TEXT)")
     database.execute_sql("INSERT INTO events (message) VALUES ($1)", ["same"])
+    has_search = tuple(map(int, sys.argv[3].split("."))) >= (0, 31, 0)
+    if has_search:
+        database.execute_sql(
+            "CREATE TABLE documents (id BIGINT PRIMARY KEY, body TEXT, "
+            "created_at TIMESTAMPTZ)"
+        )
+        database.execute_sql("CREATE SEARCH INDEX documents_text ON documents (body)")
+        database.execute_sql(
+            "INSERT INTO documents VALUES ($1, $2, $3)",
+            [1, "initial", datetime(2026, 11, 5, 12, 0, tzinfo=UTC)],
+        )
     # A WAL-only fixture does not establish row-page format compatibility.
     database.execute("CHECKPOINT")
     database.execute_sql("INSERT INTO events (message) VALUES ($1)", ["same"])
+    if has_search:
+        database.execute_sql(
+            "UPDATE documents SET body = $1 WHERE id = $2", ["database engine", 1]
+        )
     if sys.argv[2] == "process_exit":
         # Preserve the checkpoint and committed WAL tail without handle cleanup.
         os._exit(0)
