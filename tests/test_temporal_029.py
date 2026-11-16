@@ -190,7 +190,7 @@ def test_clock_defaults_share_transaction_time_and_survive_reopen(tmp_path):
 
 
 @pytest.mark.parametrize("zoned", [False, True])
-def test_timestamp_timezone_mismatch_requires_cast(tmp_path, zoned):
+def test_timestamp_comparisons_require_matching_timezone_kind(tmp_path, zoned):
     engine = create_engine(
         URL.create("hawdb", database=str(tmp_path / "mismatch.hawdb"))
     )
