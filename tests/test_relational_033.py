@@ -15,20 +15,7 @@ from sqlalchemy import (
     create_engine,
     select,
 )
-from sqlalchemy.engine import URL
 from sqlalchemy.exc import OperationalError
-
-
-@pytest.fixture(params=[False, True], ids=["file", "memory"])
-def database_url(request, tmp_path):
-    if request.param:
-        return "hawdb:///:memory:"
-    return URL.create("hawdb", database=str(tmp_path / "results.hawdb"))
-
-
-@pytest.fixture(params=[False, True], ids=["transaction", "autocommit"])
-def autocommit(request):
-    return request.param
 
 
 def test_chunked_results_preserve_types_order_and_cursor_lifecycle(

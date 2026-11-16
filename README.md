@@ -12,7 +12,7 @@ driver and its supported SQL subset.
 ## Requirements
 
 - Python 3.11 or newer
-- HawDB Python binding 0.33.x (CI tests 0.33.0)
+- HawDB Python binding 0.34.x (CI tests 0.34.0)
 - SQLAlchemy 2.x (CI tests both 2.0.x and 2.1.x)
 
 Install the dialect and its HawDB dependency from PyPI:
@@ -24,11 +24,11 @@ python -m pip install sqlalchemy-hawdb
 HawDB 0.30 introduces row-page format v2. Existing databases containing v1
 relational checkpoints cannot be opened directly; see [Upgrading to 0.30](#upgrading-to-030).
 
-To build HawDB 0.33.0 from source, build and install its wheel from the upstream
+To build HawDB 0.34.0 from source, build and install its wheel from the upstream
 release tag first:
 
 ```sh
-git clone --branch v0.33.0 https://github.com/nowledge-co/hawdb.git
+git clone --branch v0.34.0 https://github.com/nowledge-co/hawdb.git
 cd hawdb/bindings/python
 python -m pip install maturin==1.15.0
 maturin build --release --out dist
@@ -97,7 +97,7 @@ stable while the database is open. A Windows host can obtain the user's
 OS-provisioned LocalAppData path through the known-folder API. Pass the same
 anchor on read-only reopens. The default remains `None`; the dialect does not
 infer an anchor from directory existence or a permission error. See the
-[upstream host contract](https://github.com/nowledge-co/hawdb/blob/v0.33.0/bindings/python/README.md).
+[upstream host contract](https://github.com/nowledge-co/hawdb/blob/v0.34.0/bindings/python/README.md).
 
 ## Supported behavior
 
@@ -236,10 +236,45 @@ as an aware UTC value. `func.localtimestamp()` returns its naive UTC wall-clock
 equivalent. The clock stays fixed within a transaction and is evaluated again
 in later transactions. Default values are persisted when the row is written.
 
-HawDB has no session timezone. TIMESTAMP/TIMESTAMPTZ comparisons require an
-explicit CAST when their kinds differ. Native DATE/TIME, interval arithmetic,
+HawDB has no session timezone. TIMESTAMP predicates require naive parameters;
+TIMESTAMPTZ predicates require aware parameters. A WHERE clause cannot cast the
+parameter or column to bridge these kinds. Normalize Python values explicitly:
+for an aware value, use `value.astimezone(UTC).replace(tzinfo=None)` when the
+application intends its UTC wall-clock time in a TIMESTAMP column.
+Native DATE/TIME, interval arithmetic,
 `AT TIME ZONE`, and `EXTRACT` remain unsupported. See the
-[timestamp contract](https://github.com/nowledge-co/hawdb/blob/v0.31.0/docs/specs/POSTGRES_SQL_PGQ_SPEC.md#sql-timestamps).
+[timestamp contract](https://github.com/nowledge-co/hawdb/blob/v0.34.0/docs/specs/POSTGRES_SQL_PGQ_SPEC.md#sql-timestamps).
+
+### Upgrading to 0.34
+
+HawDB 0.34 adds the PEP 249 `Timestamp`, `Date`, `Time`, and `*FromTicks`
+constructors to `hawdb.dbapi`. `Timestamp` is Python's `datetime` class.
+`TimestampFromTicks()` returns an aware UTC datetime, including microseconds
+and dates before 1970, and binds through SQLAlchemy as TIMESTAMPTZ. Use
+`DateTime(timezone=True)` for these values. Ticks are interpreted in UTC rather
+than the host's local timezone.
+
+`Date` and `Time` constructors do not add SQL DATE/TIME support: binding their
+values still raises SQLAlchemy `ProgrammingError` with the driver's
+`SemanticError` available as `error.orig`. Generic SQLAlchemy `Date` and `Time`
+keep TEXT DDL; applications must encode date/time values explicitly as text.
+
+Oversized WAL records are now refused before append with a typed execution
+error rather than a storage failure. SQLAlchemy preserves the original
+`ExecutionError` under `DBAPIError`, including
+`kind="wal_record_limit_exceeded"`, `limit`, `requested`, `maximum`,
+`config_option`, and `retryable=False`. The dialect adds no automatic retry.
+After a failed commit, roll back SQLAlchemy's transaction before reusing the
+connection. The Python binding does not expose WAL limit configuration through
+`connect_args`.
+
+Engine-wide persistent format remains version 2. CI includes isolated 0.33
+checkpoint-plus-WAL-tail fixtures, with exact Decimal values, native timestamps,
+and SQL BM25 indexes, in addition to the older-version fixtures. This is focused
+relational coverage and does not establish a general downgrade guarantee.
+No database migration or recreation is automatic. See the
+[0.34 release notes](https://github.com/nowledge-co/hawdb/releases/tag/v0.34.0)
+and [Python DB-API contract](https://github.com/nowledge-co/hawdb/blob/v0.34.0/bindings/python/python/hawdb/dbapi.py).
 
 ### Upgrading to 0.33
 
@@ -324,7 +359,7 @@ Timestamp values/types and clock defaults introduced additive on-disk tags in
 HawDB 0.29. Older binaries reject databases that contain these tags. This
 timestamp boundary does not relax 0.30's independent row-page v2 requirement.
 
-### HawDB 0.33 compatibility
+### HawDB 0.34 compatibility
 
 The dialect continues to reuse PostgreSQL's type compiler and identifier
 preparer. Native timestamp/Decimal conversion and error classification stay
@@ -333,7 +368,7 @@ Existing pooling and transaction ownership remain unchanged. CI checks
 published PyPI wheels separately from release-source wheels.
 
 The `max_read_intermediate_rows` setting separates relational scan work
-from result rows in Rust and the C ABI, but the 0.33 Python binding does not
+from result rows in Rust and the C ABI, but the 0.34 Python binding does not
 accept it. Do not pass it through `connect_args`. The existing
 `max_read_result_rows` still controls the inherited scan ceiling in Python;
 `LIMIT` does not authorize more scan work. No new dialect URL option is added.
@@ -368,7 +403,7 @@ grammar.
 CI creates real v1 checkpoints in isolated HawDB 0.25.0-0.29.0 interpreters,
 then verifies that read-only and writable opens refuse them with the typed
 unsupported-format error and leave their storage files unchanged. Separate
-0.30, 0.31, and 0.33 v2 fixtures check reads, indexes, Decimal scale, duplicate keyless rows,
+0.30, 0.31, 0.33, and 0.34 v2 fixtures check reads, indexes, Decimal scale, duplicate keyless rows,
 legacy timestamp-looking TEXT, new writes, and reopen. Both normal close and
 process exit after an explicit checkpoint plus committed WAL tail are covered.
 A variable-width checkpoint test covers narrow rows, rows larger than the 32 KiB writer target,
@@ -405,13 +440,13 @@ python -m pytest
 ```
 
 GitHub Actions builds the source distribution and wheel, checks their metadata,
-builds HawDB v0.33.0 from its upstream release tag, and tests the installed
+builds HawDB v0.34.0 from its upstream release tag, and tests the installed
 dialect wheel on Python 3.11-3.13 with SQLAlchemy 2.0.x and 2.1.x for every push
 and pull request. An additional Python 3.11 / SQLAlchemy 2.1 job runs the same
 tests with HawDB's published PyPI wheel instead of the source-built wheel.
 All jobs run on Linux.
 
-Each test job also installs HawDB 0.25.0, 0.27.0, 0.28.0, 0.29.0, 0.30.0, and 0.31.0 from PyPI
+Each test job also installs HawDB 0.25.0, 0.27.0, 0.28.0, 0.29.0, 0.30.0, 0.31.0, and 0.33.0 from PyPI
 and HawDB 0.26.0 from its release tag in separate interpreters for v1 refusal
 and v2 reopen fixtures. Version 0.26.0 was not published to PyPI. To include those fixtures locally, set
 `HAWDB_PREVIOUS_PYTHON` to an interpreter containing exactly `hawdb==0.25.0` and
@@ -420,7 +455,8 @@ and v2 reopen fixtures. Version 0.26.0 was not published to PyPI. To include tho
 `HAWDB_028_PYTHON` to one containing exactly `hawdb==0.28.0`, and
 `HAWDB_029_PYTHON` to one containing exactly `hawdb==0.29.0`, and
 `HAWDB_030_PYTHON` to one containing exactly `hawdb==0.30.0`, and
-`HAWDB_031_PYTHON` to one containing exactly `hawdb==0.31.0`. Cross-version tests for
+`HAWDB_031_PYTHON` to one containing exactly `hawdb==0.31.0`, and
+`HAWDB_033_PYTHON` to one containing exactly `hawdb==0.33.0`. Cross-version tests for
 an interpreter are skipped when its environment variable is not configured.
 
 These are the project's targeted compatibility tests. SQLAlchemy's full
@@ -432,7 +468,7 @@ compliance gate.
 
 `.github/workflows/pypi.yaml` publishes the tested source distribution and wheel
 when a GitHub Release is published. The release tag must match the version in
-`pyproject.toml`, for example `v0.33.0`. A manual workflow dispatch runs the same
+`pyproject.toml`, for example `v0.34.0`. A manual workflow dispatch runs the same
 build and tests without uploading to PyPI.
 
 Configure a PyPI Trusted Publisher for the `sqlalchemy-hawdb` project with:

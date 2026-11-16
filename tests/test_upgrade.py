@@ -105,7 +105,8 @@ def test_previous_v1_checkpoint_is_refused_without_rewriting_storage(
     [
         ("0.30.0", "HAWDB_030_PYTHON"),
         ("0.31.0", "HAWDB_031_PYTHON"),
-        ("0.33.0", None),
+        ("0.33.0", "HAWDB_033_PYTHON"),
+        ("0.34.0", None),
     ],
 )
 def test_v2_checkpoint_reopens_and_accepts_writes(
